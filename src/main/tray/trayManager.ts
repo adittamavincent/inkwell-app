@@ -1,4 +1,4 @@
-import { app, Menu, nativeImage, Tray, BrowserWindow } from 'electron';
+import { app, Menu, nativeImage, Tray, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { isCaptureRunning, startCapture, stopCapture } from '../capture/keyHook';
 import { requestQuit } from '../lifecycle';
@@ -68,9 +68,16 @@ export function updateTrayMenu(
     },
     { type: 'separator' },
     {
+      label: 'Show Logs in Finder',
+      click: () => {
+        shell.showItemInFolder(logger.getLogPath());
+      },
+    },
+    { type: 'separator' },
+    {
       label: 'Quit Inkwell',
       click: () => {
-        requestQuit();
+        requestQuit('user-tray-quit');
       },
     },
   ]);

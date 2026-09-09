@@ -31,3 +31,16 @@ export function getDatabase(): Database.Database {
     throw err;
   }
 }
+
+export function closeDatabase(): void {
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+      logger.info('db', 'Database closed cleanly');
+    } catch (err) {
+      logger.error('db', 'Error closing database', err);
+    } finally {
+      dbInstance = null;
+    }
+  }
+}

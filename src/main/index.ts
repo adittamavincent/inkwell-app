@@ -8,24 +8,30 @@ app.setName('Inkwell');
 
 import { logger } from './logger';
 import { loadConfig } from './config/store';
-import { getDatabase } from './db/connection';
+import { getDatabase, closeDatabase } from './db/connection';
 import { startPermissionWatcher, stopPermissionWatcher } from './capture/permissionWatcher';
 import { stopCapture } from './capture/keyHook';
 import { stopActiveAppTracker } from './capture/activeApp';
 import { registerIpcHandlers } from './ipc/registerHandlers';
 import { setupTray, updateTrayMenu } from './tray/trayManager';
-import { getIsQuitting, setIsQuitting, requestQuit } from './lifecycle';
+import { getIsQuitting, setIsQuitting, requestQuit, getQuitReason } from './lifecycle';
+
+// Log startup diagnostics immediately upon module execution
+logger.logStartup({
+  execPath: process.execPath,
+  versions: process.versions,
+  argv: process.argv,
+  logPath: logger.getLogPath(),
+  platform: process.platform,
+  arch: process.arch,
+});
 
 // ── Global error handlers ──────────────────────────────────────────────────────
 // These catch crashes that would otherwise kill the app silently.
 process.on('uncaughtException', (err) => {
-  logger.error('main', 'UNCAUGHT EXCEPTION — terminating process', err);
-  // Give the logger time to flush before exiting
-  setTimeout(() => {
-    logger.writeCleanShutdown();
-    logger.close();
-    process.exit(1);
-  }, 200);
+  logger.recordCrash(err, 'uncaughtException');
+  logger.close();
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -41,18 +47,18 @@ process.on('beforeExit', (code) => {
 });
 
 process.on('exit', (code) => {
-  // exit handlers must remain synchronous; logger writes synchronously when possible
+  // exit handlers must remain synchronous; writeSync in logger guarantees persistence
   logger.info('main', `Process exit (code=${code})`);
 });
 
 process.on('SIGTERM', () => {
-  logger.info('main', 'Received SIGTERM, quitting...');
-  requestQuit();
+  logger.info('main', 'Received SIGTERM signal');
+  requestQuit('sigterm');
 });
 
 process.on('SIGINT', () => {
-  logger.info('main', 'Received SIGINT, quitting...');
-  requestQuit();
+  logger.info('main', 'Received SIGINT signal');
+  requestQuit('sigint');
 });
 
 export { requestQuit };
@@ -138,6 +144,17 @@ function setupApplicationMenu(): void {
         { role: 'front' },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Show Logs in Finder',
+          click: () => {
+            shell.showItemInFolder(logger.getLogPath());
+          },
+        },
+      ],
+    },
   ];
 
   const menu = Menu.buildFromTemplate(template);
@@ -146,10 +163,13 @@ function setupApplicationMenu(): void {
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  logger.warn('main', 'Single instance lock rejected — another instance of Inkwell is already running; terminating secondary process.');
   setIsQuitting(true);
+  logger.logShutdown('single-instance-conflict');
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, commandLine) => {
+    logger.info('main', 'Second instance launch detected; bringing main window to front', { commandLine });
     showWindow();
   });
 }
@@ -314,13 +334,23 @@ app.on('before-quit', (event) => {
     return;
   }
 
-  logger.info('main', 'before-quit — cleaning up resources');
+  const reason = getQuitReason();
+  logger.info('main', `before-quit — cleaning up resources (reason: ${reason})`);
   setIsQuitting(true);
   stopPermissionWatcher();
   stopActiveAppTracker();
   stopCapture();
-  logger.writeCleanShutdown();
+  closeDatabase();
+  logger.logShutdown(reason);
   logger.close();
+});
+
+app.on('will-quit', () => {
+  logger.info('main', 'will-quit — application terminating');
+});
+
+app.on('quit', (_event, exitCode) => {
+  logger.info('main', `quit — application exited with code ${exitCode}`);
 });
 
 app.on('child-process-gone', (_event, details) => {

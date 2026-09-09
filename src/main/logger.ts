@@ -2,67 +2,59 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const LOG_DIR = path.join(os.homedir(), 'Library', 'Logs', 'Inkwell');
-const LOG_FILE = path.join(LOG_DIR, 'inkwell.log');
-const HEARTBEAT_FILE = path.join(LOG_DIR, 'heartbeat.json');
 const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_LOG_FILES = 3;
 const HEARTBEAT_INTERVAL_MS = 20_000; // 20 seconds
 
-let logStream: fs.WriteStream | null = null;
+function getDefaultLogDir(): string {
+  if (process.env.INKWELL_LOG_DIR) {
+    return process.env.INKWELL_LOG_DIR;
+  }
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return path.join(os.tmpdir(), 'inkwell-test-logs');
+  }
+  return path.join(os.homedir(), 'Library', 'Logs', 'Inkwell');
+}
+
+let currentLogDir = getDefaultLogDir();
+let currentLogFile = path.join(currentLogDir, 'inkwell.log');
+let currentHeartbeatFile = path.join(currentLogDir, 'heartbeat.json');
+
 const runId = `${process.pid}-${Date.now().toString(36)}`;
 const startedAt = Date.now();
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let isCleanShutdown = false;
 
 function ensureLogDir(): void {
-  if (!fs.existsSync(LOG_DIR)) {
+  if (!fs.existsSync(currentLogDir)) {
     try {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
+      fs.mkdirSync(currentLogDir, { recursive: true });
     } catch {
-      // Cannot create log dir — silently fail
+      // Cannot create log dir — non-critical fallback
     }
   }
 }
 
 function rotateIfNeeded(): void {
   try {
-    if (fs.existsSync(LOG_FILE)) {
-      const stats = fs.statSync(LOG_FILE);
-      if (stats.size > MAX_LOG_SIZE) {
-        // Shift existing rotated logs
-        for (let i = MAX_LOG_FILES - 1; i >= 1; i--) {
-          const from = path.join(LOG_DIR, `inkwell.${i}.log`);
-          const to = path.join(LOG_DIR, `inkwell.${i + 1}.log`);
-          if (fs.existsSync(from)) {
-            if (i + 1 >= MAX_LOG_FILES) {
-              fs.unlinkSync(from);
-            } else {
-              fs.renameSync(from, to);
-            }
+    if (!fs.existsSync(currentLogFile)) return;
+    const stats = fs.statSync(currentLogFile);
+    if (stats.size > MAX_LOG_SIZE) {
+      for (let i = MAX_LOG_FILES - 1; i >= 1; i--) {
+        const from = path.join(currentLogDir, `inkwell.${i}.log`);
+        const to = path.join(currentLogDir, `inkwell.${i + 1}.log`);
+        if (fs.existsSync(from)) {
+          if (i + 1 >= MAX_LOG_FILES) {
+            fs.unlinkSync(from);
+          } else {
+            fs.renameSync(from, to);
           }
         }
-        fs.renameSync(LOG_FILE, path.join(LOG_DIR, 'inkwell.1.log'));
       }
+      fs.renameSync(currentLogFile, path.join(currentLogDir, 'inkwell.1.log'));
     }
   } catch {
     // Rotation failure is non-critical
-  }
-}
-
-function getStream(): fs.WriteStream | null {
-  if (logStream) return logStream;
-  ensureLogDir();
-  rotateIfNeeded();
-  try {
-    logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
-    // A logging failure must never become the application failure. This is
-    // especially important in tests and when the log directory is unavailable.
-    logStream.on('error', () => {
-      logStream = null;
-    });
-    return logStream;
-  } catch {
-    return null;
   }
 }
 
@@ -72,17 +64,37 @@ function timestamp(): string {
 
 function serializeData(data: unknown): unknown {
   if (data instanceof Error) {
-    return { name: data.name, message: data.message, stack: data.stack, cause: data.cause };
+    const errorObj: Record<string, unknown> = {
+      name: data.name,
+      message: data.message,
+      stack: data.stack,
+    };
+    if (data.cause) {
+      errorObj.cause = serializeData(data.cause);
+    }
+    for (const key of Object.keys(data)) {
+      if (!(key in errorObj)) {
+        errorObj[key] = (data as unknown as Record<string, unknown>)[key];
+      }
+    }
+    return errorObj;
   }
-  if (typeof data === 'string') return data;
+  if (typeof data === 'bigint') {
+    return data.toString();
+  }
+  if (typeof data === 'function') {
+    return `[Function: ${data.name || 'anonymous'}]`;
+  }
   return data;
 }
 
-function write(level: string, component: string, message: string, data?: unknown): void {
-  const stream = getStream();
-  if (!stream) return;
+function writeSync(level: string, component: string, message: string, data?: unknown): void {
+  ensureLogDir();
+  rotateIfNeeded();
 
-  let line = `${timestamp()} [${level}] [${component}] [pid=${process.pid} run=${runId} uptimeMs=${Math.round(process.uptime() * 1000)}] ${message}`;
+  const uptimeMs = Math.round(process.uptime() * 1000);
+  let line = `${timestamp()} [${level}] [${component}] [pid=${process.pid} run=${runId} uptimeMs=${uptimeMs}] ${message}`;
+
   if (data !== undefined) {
     try {
       line += ` | ${JSON.stringify(serializeData(data))}`;
@@ -90,23 +102,42 @@ function write(level: string, component: string, message: string, data?: unknown
       line += ` | [unserializable]`;
     }
   }
-  stream.write(line + '\n');
+
+  // Synchronous atomic write directly to filesystem.
+  // This guarantees that any log statement before a process crash, SIGTERM, or quit
+  // is physically persisted on disk immediately with no buffering loss.
+  try {
+    fs.appendFileSync(currentLogFile, line + '\n', 'utf8');
+  } catch (err) {
+    // If writing to file fails (e.g. read-only filesystem), fallback to stderr
+    console.error('Inkwell: Failed to write to log file:', err);
+  }
 }
 
-// ── Heartbeat mechanism (unclean-shutdown detection) ─────────────────────────
-// Writes a small JSON file periodically so the *next* boot can detect if the
-// previous session ended without a clean shutdown (native crash, SIGSEGV, etc).
+// ── Heartbeat mechanism (unclean-shutdown & crash detection) ────────────────
 
-function writeHeartbeatFile(extra?: Record<string, unknown>): void {
+interface HeartbeatPayload {
+  runId: string;
+  pid: number;
+  lastHeartbeatAt: string;
+  cleanShutdown?: boolean;
+  shutdownReason?: string;
+  shutdownAt?: string;
+  uptimeSeconds?: number;
+  lastError?: unknown;
+}
+
+function writeHeartbeatFile(extra?: Partial<HeartbeatPayload>): void {
   try {
     ensureLogDir();
-    const payload = {
+    const payload: HeartbeatPayload = {
       runId,
       pid: process.pid,
       lastHeartbeatAt: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
       ...extra,
     };
-    fs.writeFileSync(HEARTBEAT_FILE, JSON.stringify(payload), 'utf-8');
+    fs.writeFileSync(currentHeartbeatFile, JSON.stringify(payload, null, 2), 'utf-8');
   } catch {
     // Heartbeat failure must never affect the app
   }
@@ -114,8 +145,10 @@ function writeHeartbeatFile(extra?: Record<string, unknown>): void {
 
 function startHeartbeat(): void {
   if (heartbeatTimer) return;
-  writeHeartbeatFile();
-  heartbeatTimer = setInterval(() => writeHeartbeatFile(), HEARTBEAT_INTERVAL_MS);
+  writeHeartbeatFile({ cleanShutdown: false });
+  heartbeatTimer = setInterval(() => {
+    writeHeartbeatFile({ cleanShutdown: false });
+  }, HEARTBEAT_INTERVAL_MS);
 }
 
 function stopHeartbeat(): void {
@@ -125,21 +158,11 @@ function stopHeartbeat(): void {
   }
 }
 
-/** Call on clean shutdown to mark this runId as cleanly exited. */
-function writeCleanShutdown(): void {
-  writeHeartbeatFile({ cleanShutdown: true });
-  stopHeartbeat();
-}
-
-/**
- * Read the heartbeat file left by the previous run. Returns null if no file
- * exists or it cannot be read. Otherwise returns the parsed JSON.
- */
-function readPreviousHeartbeat(): Record<string, unknown> | null {
+function readPreviousHeartbeat(): HeartbeatPayload | null {
   try {
-    if (!fs.existsSync(HEARTBEAT_FILE)) return null;
-    const raw = fs.readFileSync(HEARTBEAT_FILE, 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
+    if (!fs.existsSync(currentHeartbeatFile)) return null;
+    const raw = fs.readFileSync(currentHeartbeatFile, 'utf-8');
+    return JSON.parse(raw) as HeartbeatPayload;
   } catch {
     return null;
   }
@@ -147,66 +170,140 @@ function readPreviousHeartbeat(): Record<string, unknown> | null {
 
 export const logger = {
   info(component: string, message: string, data?: unknown): void {
-    write('INFO', component, message, data);
-  },
-
-  warn(component: string, message: string, data?: unknown): void {
-    write('WARN', component, message, data);
-    // Also write to stderr for dev mode visibility
-    console.warn(`Inkwell [${component}]: ${message}`, data ?? '');
-  },
-
-  error(component: string, message: string, data?: unknown): void {
-    write('ERROR', component, message, data);
-    console.error(`Inkwell [${component}]: ${message}`, data ?? '');
-  },
-
-  debug(component: string, message: string, data?: unknown): void {
-    write('DEBUG', component, message, data);
-  },
-
-  /** Flush and close the log stream. Call before app quits. */
-  close(): void {
-    if (logStream) {
-      try {
-        logStream.end();
-      } catch {
-        // Ignore
-      }
-      logStream = null;
+    writeSync('INFO', component, message, data);
+    if (process.env.NODE_ENV !== 'production' && !process.env.VITEST) {
+      console.log(`Inkwell [${component}]: ${message}`, data !== undefined ? data : '');
     }
   },
 
-  /** Start the periodic heartbeat writer. Call once after app.whenReady(). */
+  warn(component: string, message: string, data?: unknown): void {
+    writeSync('WARN', component, message, data);
+    console.warn(`Inkwell [${component}]: ${message}`, data !== undefined ? data : '');
+  },
+
+  error(component: string, message: string, data?: unknown): void {
+    writeSync('ERROR', component, message, data);
+    console.error(`Inkwell [${component}]: ${message}`, data !== undefined ? data : '');
+  },
+
+  debug(component: string, message: string, data?: unknown): void {
+    writeSync('DEBUG', component, message, data);
+    if (process.env.NODE_ENV !== 'production' && !process.env.VITEST) {
+      console.debug(`Inkwell [${component}]: ${message}`, data !== undefined ? data : '');
+    }
+  },
+
+  /**
+   * Log an explicit shutdown event and persist clean shutdown state.
+   */
+  logShutdown(reason: string, details?: unknown): void {
+    if (isCleanShutdown) return;
+    isCleanShutdown = true;
+    const uptimeSec = Math.round(process.uptime());
+    writeSync('INFO', 'lifecycle', `Shutting down (reason: ${reason}, uptime: ${uptimeSec}s)`, details);
+    writeHeartbeatFile({
+      cleanShutdown: true,
+      shutdownReason: reason,
+      shutdownAt: new Date().toISOString(),
+      uptimeSeconds: uptimeSec,
+    });
+    stopHeartbeat();
+  },
+
+  /**
+   * Record a fatal crash or unhandled exception immediately before exit.
+   */
+  recordCrash(error: unknown, context = 'fatal-crash'): void {
+    const serialized = serializeData(error);
+    writeSync('FATAL', 'main', `Fatal crash encountered (${context})`, serialized);
+    writeHeartbeatFile({
+      cleanShutdown: false,
+      shutdownReason: context,
+      shutdownAt: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      lastError: serialized,
+    });
+    stopHeartbeat();
+  },
+
+  /**
+   * Flushes logs and stops timers. Synchronous and safe on process exit.
+   */
+  close(): void {
+    stopHeartbeat();
+  },
+
+  /**
+   * Stop the heartbeat and write a clean-shutdown marker.
+   */
+  writeCleanShutdown(reason = 'clean-exit'): void {
+    this.logShutdown(reason);
+  },
+
+  /**
+   * Start periodic heartbeat writer.
+   */
   startHeartbeat(): void {
     startHeartbeat();
   },
 
-  /** Stop the heartbeat and write a clean-shutdown marker. */
-  writeCleanShutdown(): void {
-    writeCleanShutdown();
-  },
-
   /**
-   * Check if the previous run ended uncleanly. Logs an ERROR if so.
-   * Call at the very start of app.whenReady(), before any other logging.
+   * Check if the previous run ended uncleanly and log findings.
    */
   checkPreviousRun(): void {
     const prev = readPreviousHeartbeat();
-    if (prev && typeof prev.runId === 'string' && !prev.cleanShutdown) {
-      write('ERROR', 'main', 'Previous session ended unexpectedly — no clean shutdown detected', {
-        previousRunId: prev.runId,
-        previousPid: prev.pid,
-        lastHeartbeatAt: prev.lastHeartbeatAt,
-      });
+    if (prev && typeof prev.runId === 'string' && prev.runId !== runId) {
+      if (!prev.cleanShutdown) {
+        writeSync(
+          'ERROR',
+          'lifecycle',
+          'Previous session ended unexpectedly (unclean shutdown / crash detected)',
+          {
+            previousRunId: prev.runId,
+            previousPid: prev.pid,
+            lastHeartbeatAt: prev.lastHeartbeatAt,
+            lastError: prev.lastError,
+          }
+        );
+      } else {
+        writeSync('INFO', 'lifecycle', 'Previous session exited cleanly', {
+          previousRunId: prev.runId,
+          previousPid: prev.pid,
+          shutdownAt: prev.shutdownAt || prev.lastHeartbeatAt,
+          shutdownReason: prev.shutdownReason || 'unknown',
+        });
+      }
     }
-    // Write initial heartbeat for this run (overwrites the stale file)
-    writeHeartbeatFile();
+    // Initialize heartbeat for current run
+    writeHeartbeatFile({ cleanShutdown: false });
+  },
+
+  /**
+   * Log startup information.
+   */
+  logStartup(details: Record<string, unknown>): void {
+    writeSync('INFO', 'main', 'Inkwell process initialized', {
+      ...details,
+      run: this.getRunContext(),
+    });
   },
 
   /** Returns the log file path for display to the user. */
   getLogPath(): string {
-    return LOG_FILE;
+    return currentLogFile;
+  },
+
+  /** Returns the directory where logs are kept. */
+  getLogDir(): string {
+    return currentLogDir;
+  },
+
+  /** Override log directory (primarily for test isolation). */
+  setLogDir(dir: string): void {
+    currentLogDir = dir;
+    currentLogFile = path.join(currentLogDir, 'inkwell.log');
+    currentHeartbeatFile = path.join(currentLogDir, 'heartbeat.json');
+    ensureLogDir();
   },
 
   getRunContext(): { runId: string; pid: number; startedAt: string } {
