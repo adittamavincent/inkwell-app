@@ -12,7 +12,6 @@ export interface CogdexSyncConfig {
   dayPattern: string;
   keylogSuffix: string;
   idleTimeoutSecs: number;
-  appSwitchGraceSecs: number;
   excludedApps: string[];
 }
 

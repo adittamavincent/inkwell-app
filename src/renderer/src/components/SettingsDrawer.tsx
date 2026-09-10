@@ -45,7 +45,6 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
       ...form,
       excludedApps: apps,
       idleTimeoutSecs: Number(form.idleTimeoutSecs) || 60,
-      appSwitchGraceSecs: Number(form.appSwitchGraceSecs) || 10,
     });
 
     setIsSaving(false);
@@ -166,38 +165,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           </div>
         </div>
 
-        {/* Idle Timeout & App Switch Grace Period */}
-        <div className="grid grid-cols-2 gap-2.5">
-          <div>
-            <label className="block font-medium text-ink-text mb-1">
-              Idle Gap (s)
-            </label>
-            <input
-              type="number"
-              min="5"
-              max="3600"
-              value={form.idleTimeoutSecs}
-              onChange={(e) =>
-                setForm({ ...form, idleTimeoutSecs: parseInt(e.target.value, 10) || 60 })
-              }
-              className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text text-xs focus:border-ink-accent transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block font-medium text-ink-text mb-1">
-              App Grace (s)
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="300"
-              value={form.appSwitchGraceSecs}
-              onChange={(e) =>
-                setForm({ ...form, appSwitchGraceSecs: parseInt(e.target.value, 10) || 10 })
-              }
-              className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text text-xs focus:border-ink-accent transition-colors"
-            />
-          </div>
+        {/* Idle Timeout */}
+        <div>
+          <label className="block font-medium text-ink-text mb-1">
+            Idle Gap (s)
+          </label>
+          <input
+            type="number"
+            min="5"
+            max="3600"
+            value={form.idleTimeoutSecs}
+            onChange={(e) =>
+              setForm({ ...form, idleTimeoutSecs: parseInt(e.target.value, 10) || 60 })
+            }
+            className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text text-xs focus:border-ink-accent transition-colors"
+          />
         </div>
 
         {/* Excluded Apps */}

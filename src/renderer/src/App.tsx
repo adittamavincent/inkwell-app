@@ -14,13 +14,6 @@ import {
 import { reconstructText } from '../../shared/reconstructor';
 import { DEFAULT_CONFIG, CogdexSyncConfig } from '../../shared/constants';
 
-interface SuspendedSession {
-  tokens: string[];
-  app: string;
-  start: string;
-  suspendedAt: number;
-}
-
 export const App: React.FC = () => {
   const [isRunning, setIsRunning] = useState(true);
   const [permissions, setPermissions] = useState<PermissionStatus | null>(null);
@@ -72,24 +65,9 @@ export const App: React.FC = () => {
   const liveTokensRef = useRef<string[]>([]);
   const liveAppRef = useRef<string>('');
   const liveStartRef = useRef<string | null>(null);
-  const suspendedSessionRef = useRef<SuspendedSession | null>(null);
   const lastKeyTimeRef = useRef<number>(0);
 
   const flushLiveSession = useCallback(() => {
-    // Flush any suspended session first
-    if (suspendedSessionRef.current) {
-      const reconstructed = reconstructText(suspendedSessionRef.current.tokens);
-      if (reconstructed.trim()) {
-        const newSession: SessionPreview = {
-          start: suspendedSessionRef.current.start,
-          app: suspendedSessionRef.current.app,
-          text: reconstructed,
-        };
-        setHistory((prev) => [newSession, ...prev]);
-      }
-      suspendedSessionRef.current = null;
-    }
-
     if (liveTokensRef.current.length > 0) {
       const reconstructed = reconstructText(liveTokensRef.current);
       if (reconstructed.trim()) {
@@ -153,25 +131,11 @@ export const App: React.FC = () => {
     const unsubscribeKeystroke = window.inkwellApi.onKeystroke((payload: KeystrokePayload) => {
       const now = Date.now();
       const idleLimitMs = (configRef.current.idleTimeoutSecs || 60) * 1000;
-      const graceLimitMs = (configRef.current.appSwitchGraceSecs || 10) * 1000;
       const timedOut =
         lastKeyTimeRef.current > 0 && now - lastKeyTimeRef.current > idleLimitMs;
 
       if (timedOut) {
         // Idle gap splits unconditionally
-        if (suspendedSessionRef.current) {
-          const reconstructed = reconstructText(suspendedSessionRef.current.tokens);
-          if (reconstructed.trim()) {
-            const finishedSuspended: SessionPreview = {
-              start: suspendedSessionRef.current.start,
-              app: suspendedSessionRef.current.app,
-              text: reconstructed,
-            };
-            setHistory((prev) => [finishedSuspended, ...prev]);
-          }
-          suspendedSessionRef.current = null;
-        }
-
         if (liveTokensRef.current.length > 0) {
           const reconstructed = reconstructText(liveTokensRef.current);
           if (reconstructed.trim()) {
@@ -190,44 +154,20 @@ export const App: React.FC = () => {
       } else if (liveAppRef.current && liveAppRef.current === payload.appName) {
         // Continuation in same app
         liveTokensRef.current.push(payload.keyChar);
-      } else if (
-        suspendedSessionRef.current &&
-        suspendedSessionRef.current.app === payload.appName &&
-        now - suspendedSessionRef.current.suspendedAt <= graceLimitMs &&
-        liveTokensRef.current.length <= 2
-      ) {
-        // Quick return to suspended app within grace window with <= 2 stray keys in other app.
-        // Discard stray interstitial tokens and merge into original session!
-        liveTokensRef.current = [...suspendedSessionRef.current.tokens, payload.keyChar];
-        liveAppRef.current = suspendedSessionRef.current.app;
-        liveStartRef.current = suspendedSessionRef.current.start;
-        suspendedSessionRef.current = null;
       } else {
-        // App changed or grace window exceeded or real typing in other app
-        if (suspendedSessionRef.current) {
-          const reconstructed = reconstructText(suspendedSessionRef.current.tokens);
+        // App changed or starting first session
+        if (liveTokensRef.current.length > 0) {
+          const reconstructed = reconstructText(liveTokensRef.current);
           if (reconstructed.trim()) {
-            const finishedSuspended: SessionPreview = {
-              start: suspendedSessionRef.current.start,
-              app: suspendedSessionRef.current.app,
+            const finishedSession: SessionPreview = {
+              start: liveStartRef.current || new Date().toISOString(),
+              app: liveAppRef.current || 'Unknown',
               text: reconstructed,
             };
-            setHistory((prev) => [finishedSuspended, ...prev]);
+            setHistory((prev) => [finishedSession, ...prev]);
           }
-          suspendedSessionRef.current = null;
         }
 
-        if (liveTokensRef.current.length > 0) {
-          // Suspend current session
-          suspendedSessionRef.current = {
-            tokens: [...liveTokensRef.current],
-            app: liveAppRef.current,
-            start: liveStartRef.current || new Date().toISOString(),
-            suspendedAt: lastKeyTimeRef.current || now,
-          };
-        }
-
-        // Start interstitial/new session
         liveTokensRef.current = [payload.keyChar];
         liveAppRef.current = payload.appName;
         liveStartRef.current = payload.timestamp;
@@ -311,7 +251,6 @@ export const App: React.FC = () => {
     liveTokensRef.current = [];
     liveAppRef.current = '';
     liveStartRef.current = null;
-    suspendedSessionRef.current = null;
     lastKeyTimeRef.current = 0;
     setHistory([]);
     setLiveTokens([]);
@@ -340,13 +279,6 @@ export const App: React.FC = () => {
     if (liveText.trim()) {
       const timeStr = liveStart ? new Date(liveStart).toLocaleTimeString() : '';
       fullPreview += `${timeStr} · ${liveApp || 'Live'}\n${liveText}\n\n`;
-    }
-    if (suspendedSessionRef.current) {
-      const recon = reconstructText(suspendedSessionRef.current.tokens);
-      if (recon.trim()) {
-        const timeStr = new Date(suspendedSessionRef.current.start).toLocaleTimeString();
-        fullPreview += `${timeStr} · ${suspendedSessionRef.current.app}\n${recon}\n\n`;
-      }
     }
     for (const s of history) {
       const timeStr = new Date(s.start).toLocaleTimeString();
@@ -431,9 +363,7 @@ export const App: React.FC = () => {
   }
 
   const effectiveSessionCount =
-    history.length +
-    (liveText ? 1 : 0) +
-    (suspendedSessionRef.current && reconstructText(suspendedSessionRef.current.tokens).trim() ? 1 : 0);
+    history.length + (liveText ? 1 : 0);
 
   // 2. Normal Main Application UI
   return (

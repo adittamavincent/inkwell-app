@@ -5,7 +5,6 @@ export interface CogdexSyncConfig {
   dayPattern: string;
   keylogSuffix: string;
   idleTimeoutSecs: number;
-  appSwitchGraceSecs: number;
   excludedApps: string[];
 }
 
@@ -27,6 +26,5 @@ export const DEFAULT_CONFIG: CogdexSyncConfig = {
   dayPattern: '%Y-%m-%d',
   keylogSuffix: ' - keylog',
   idleTimeoutSecs: 60,
-  appSwitchGraceSecs: 10,
   excludedApps: DEFAULT_EXCLUDED_APPS,
 };

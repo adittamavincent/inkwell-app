@@ -78,7 +78,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   ipcMain.handle('inkwell:getHistory', () => {
     const config = getConfig();
-    return loadAllHistory(config.idleTimeoutSecs, config.appSwitchGraceSecs);
+    return loadAllHistory(config.idleTimeoutSecs);
   });
 
   ipcMain.handle('inkwell:clearHistory', () => {

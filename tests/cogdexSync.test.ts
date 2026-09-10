@@ -46,7 +46,6 @@ describe('Cogdex Obsidian Sync', () => {
       dayPattern: '%Y-%m-%d',
       keylogSuffix: ' - keylog',
       idleTimeoutSecs: 60,
-      appSwitchGraceSecs: 10,
       excludedApps: [],
     });
 
@@ -78,7 +77,6 @@ describe('Cogdex Obsidian Sync', () => {
       dayPattern: '%Y-%m-%d',
       keylogSuffix: ' - keylog',
       idleTimeoutSecs: 60,
-      appSwitchGraceSecs: 10,
       excludedApps: [],
     });
 
