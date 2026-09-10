@@ -5,7 +5,6 @@ interface LocatorProviderProps {
 }
 
 export function LocatorProvider({ projectPath }: LocatorProviderProps) {
-  const resolvedPath = projectPath || process.env.NEXT_PUBLIC_PROJECT_PATH;
   const locatorEnabled = import.meta.env.DEV;
 
   useEffect(() => {
@@ -13,9 +12,9 @@ export function LocatorProvider({ projectPath }: LocatorProviderProps) {
       import('@locator/runtime').then((mod) => {
         const setupLocatorUI = mod.default;
         setupLocatorUI(
-          resolvedPath
+          projectPath
             ? {
-                projectPath: resolvedPath,
+                projectPath: projectPath,
                 targets: {
                   antigravity: {
                     url: 'antigravity-ide://file/${projectPath}${filePath}:${line}:${column}',
@@ -42,7 +41,7 @@ export function LocatorProvider({ projectPath }: LocatorProviderProps) {
         );
       });
     }
-  }, [locatorEnabled, resolvedPath]);
+  }, [locatorEnabled, projectPath]);
 
   return null;
 }
