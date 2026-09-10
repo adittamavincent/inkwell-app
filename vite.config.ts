@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
+import locatorBabelJsx from '@locator/babel-jsx';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: path.join(__dirname, 'src/renderer'),
   publicDir: path.join(__dirname, 'src/renderer/public'),
   base: './',
@@ -17,7 +18,11 @@ export default defineConfig({
     },
   },
   plugins: [
-    react(),
+    react({
+      babel: {
+        plugins: mode === 'development' ? [locatorBabelJsx] : [],
+      },
+    }),
     electron([
       {
         entry: path.join(__dirname, 'src/main/index.ts'),
@@ -25,10 +30,10 @@ export default defineConfig({
           options.startup();
         },
         vite: {
-            build: {
-              outDir: path.join(__dirname, 'dist-electron/main'),
-              emptyOutDir: true,
-              rollupOptions: {
+          build: {
+            outDir: path.join(__dirname, 'dist-electron/main'),
+            emptyOutDir: true,
+            rollupOptions: {
               external: [
                 'electron',
                 'better-sqlite3',
@@ -69,4 +74,4 @@ export default defineConfig({
   server: {
     port: 5173,
   },
-});
+}));
