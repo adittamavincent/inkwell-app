@@ -36,11 +36,48 @@ function decodeBase64Safe(b64: string): string {
   return '';
 }
 
+function buildEnclosure(content: string, fenceCount: number): string {
+  if (fenceCount === 1) {
+    return `\`${content}\``;
+  }
+  const fence = '`'.repeat(fenceCount);
+  return `${fence}\n${content}\n${fence}\n`;
+}
+
 export function reconstructText(tokens: string[]): string {
   const buffer: string[] = [];
   let cursor = 0;
   let selection: [number, number] | null = null;
   let lastPastedContent = '';
+  let lastPasteRange: [number, number] | null = null;
+
+  const applyQSnippet = (content: string, fenceCount: number, customTriggerLength?: number) => {
+    let replaceStart: number;
+    let replaceEnd: number;
+
+    if (lastPasteRange) {
+      replaceStart = lastPasteRange[0];
+      replaceEnd = cursor;
+    } else {
+      if (customTriggerLength && customTriggerLength > 0 && cursor >= customTriggerLength) {
+        replaceStart = cursor - customTriggerLength;
+      } else {
+        replaceStart = cursor;
+      }
+      replaceEnd = cursor;
+    }
+
+    buffer.splice(replaceStart, replaceEnd - replaceStart);
+    cursor = replaceStart;
+
+    const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
+    const snippet = `${prefix}${buildEnclosure(content, fenceCount)}`;
+    const chars = snippet.split('');
+    buffer.splice(cursor, 0, ...chars);
+    cursor += chars.length;
+
+    lastPasteRange = null;
+  };
 
   for (const rawToken of tokens) {
     if (!rawToken) continue;
@@ -59,11 +96,12 @@ export function reconstructText(tokens: string[]): string {
         content = rawToken.slice(7, -1);
       }
       lastPastedContent = content;
-      // Regular paste: wrap in single-line backticks (inline code/paste enclosure) so it renders as a visual chip/enclosure without adding block newlines
-      const inlineEnclosure = `\`${content}\``;
+      const startIdx = cursor;
+      const inlineEnclosure = buildEnclosure(content, 1);
       const chars = inlineEnclosure.split('');
       buffer.splice(cursor, 0, ...chars);
       cursor += chars.length;
+      lastPasteRange = [startIdx, cursor];
       continue;
     }
 
@@ -75,7 +113,6 @@ export function reconstructText(tokens: string[]): string {
       }
       const isQ3 = rawToken.startsWith('[Q3Q:');
       const fenceCount = isQ3 ? 3 : 4;
-      const fence = '`'.repeat(fenceCount);
       let content = lastPastedContent;
 
       if (rawToken.startsWith('[Q3Q:b64:') || rawToken.startsWith('[Q4Q:b64:')) {
@@ -87,21 +124,16 @@ export function reconstructText(tokens: string[]): string {
         }
       }
 
-      // Remove the preceding 'q' and '3' or '4' that were entered into buffer before this token
+      let triggerLen = 0;
       if (
         cursor >= 2 &&
         (buffer[cursor - 2] === 'q' || buffer[cursor - 2] === 'Q') &&
         (buffer[cursor - 1] === '3' || buffer[cursor - 1] === '4')
       ) {
-        buffer.splice(cursor - 2, 2);
-        cursor -= 2;
+        triggerLen = 2;
       }
 
-      const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
-      const snippet = `${prefix}${fence}\n${content}\n${fence}\n`;
-      const chars = snippet.split('');
-      buffer.splice(cursor, 0, ...chars);
-      cursor += chars.length;
+      applyQSnippet(content, fenceCount, triggerLen);
       continue;
     }
 
@@ -124,16 +156,7 @@ export function reconstructText(tokens: string[]): string {
         (buffer[cursor - 1] === '3' || buffer[cursor - 1] === '4')
       ) {
         const fenceCount = buffer[cursor - 1] === '3' ? 3 : 4;
-        const fence = '`'.repeat(fenceCount);
-        // Remove 'q' and '3'/'4' before cursor
-        buffer.splice(cursor - 2, 2);
-        cursor -= 2;
-
-        const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
-        const snippet = `${prefix}${fence}\n${lastPastedContent}\n${fence}\n`;
-        const chars = snippet.split('');
-        buffer.splice(cursor, 0, ...chars);
-        cursor += chars.length;
+        applyQSnippet(lastPastedContent, fenceCount, 2);
         continue;
       }
 

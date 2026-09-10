@@ -69,21 +69,21 @@ describe('reconstructText', () => {
     expect(reconstructText(tokens)).toBe('let `const x = 42;` y');
   });
 
-  it('handles universal q3q snippet expansion wrapping previous paste with 3 backticks', () => {
+  it('handles universal q3q snippet expansion replacing previous paste with 3 backticks', () => {
     const pasted = 'console.log("hello");';
     const b64 = Buffer.from(pasted).toString('base64');
     const tokens = ['[PASTE:b64:' + b64 + ']', '[↵]', 'q', '3', 'q', 'm', 'o', 'r', 'e'];
     expect(reconstructText(tokens)).toBe(
-      `\`console.log("hello");\`\n\`\`\`\nconsole.log("hello");\n\`\`\`\nmore`
+      `\`\`\`\nconsole.log("hello");\n\`\`\`\nmore`
     );
   });
 
-  it('handles universal q4q snippet expansion wrapping previous paste with 4 backticks', () => {
+  it('handles universal q4q snippet expansion replacing previous paste with 4 backticks', () => {
     const pasted = '<div>Hello</div>';
     const b64 = Buffer.from(pasted).toString('base64');
     const tokens = ['[PASTE:b64:' + b64 + ']', '[↵]', 'q', '4', 'q'];
     expect(reconstructText(tokens)).toBe(
-      `\`<div>Hello</div>\`\n\`\`\`\`\n<div>Hello</div>\n\`\`\`\`\n`
+      `\`\`\`\`\n<div>Hello</div>\n\`\`\`\`\n`
     );
   });
 
