@@ -260,7 +260,7 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
 
       {/* Hover Popover showing FULL Syntax-Highlighted Snippet */}
       {isHovered && cleanCode.trim().length > 0 && isTrimmed && (
-        <div className="absolute left-0 bottom-full mb-2 z-50 min-w-[260px] max-w-[440px] bg-ink-sidebar/95 backdrop-blur-md rounded-lg border border-ink-border shadow-2xl p-2.5 text-left pointer-events-auto">
+        <div className="absolute left-0 bottom-full mb-2 z-50 min-w-[200px] w-max max-w-[85vw] sm:max-w-[440px] bg-ink-sidebar/95 backdrop-blur-md rounded-lg border border-ink-border shadow-2xl p-2.5 text-left pointer-events-auto">
           <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-ink-border text-[10px] text-ink-muted select-none">
             <span className="font-medium text-ink-accent-light flex items-center gap-1">
               <CodeIcon className="w-3 h-3" />

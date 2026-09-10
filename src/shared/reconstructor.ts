@@ -59,11 +59,9 @@ export function reconstructText(tokens: string[]): string {
         content = rawToken.slice(7, -1);
       }
       lastPastedContent = content;
-      // Enclose pasted content with backtick code fence (```\ncontent\n```)
-      const fence = '```';
-      const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
-      const snippet = `${prefix}${fence}\n${content}\n${fence}\n`;
-      const chars = snippet.split('');
+      // Regular paste: wrap in single-line backticks (inline code/paste enclosure) so it renders as a visual chip/enclosure without adding block newlines
+      const inlineEnclosure = `\`${content}\``;
+      const chars = inlineEnclosure.split('');
       buffer.splice(cursor, 0, ...chars);
       cursor += chars.length;
       continue;
