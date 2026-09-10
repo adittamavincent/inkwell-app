@@ -72,8 +72,8 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Locate zipped .app
         run: |
-          DMG=$(find dist -maxdepth 1 -name '*.dmg' | head -n1)
-          ZIP=$(find dist -maxdepth 1 -name '*.zip' | head -n1)
+          DMG=$(find release -maxdepth 1 -name '*.dmg' | head -n1)
+          ZIP=$(find release -maxdepth 1 -name '*.zip' | head -n1)
           echo "DMG=$DMG" >> "$GITHUB_ENV"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
