@@ -110,7 +110,7 @@ describe('Logger system', () => {
     logger.checkPreviousRun();
 
     const logContent = fs.readFileSync(logFile, 'utf8');
-    expect(logContent).toContain('Previous session ended unexpectedly (unclean shutdown / crash detected)');
+    expect(logContent).toContain('Previous session ended unexpectedly');
     expect(logContent).toContain('crashed-run-999');
     expect(logContent).toContain('99999');
   });

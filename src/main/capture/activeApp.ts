@@ -121,35 +121,48 @@ function findAppBundlePath(appName: string, ownerPath?: string): string | null {
 // Icon extraction
 // ─────────────────────────────────────────────────────────────────────────────
 
+let inFlightSpawns = 0;
+let maxConcurrentSpawns = 0;
+
 function icnsToDataUrl(icnsPath: string): Promise<string | null> {
   return new Promise((resolve) => {
+    inFlightSpawns++;
+    maxConcurrentSpawns = Math.max(maxConcurrentSpawns, inFlightSpawns);
+    const start = Date.now();
+    const finish = (result: string | null, err?: Error | null) => {
+      inFlightSpawns--;
+      const durationMs = Date.now() - start;
+      if (durationMs > 500 || err) {
+        logger.warn('activeApp', 'sips spawn slow or failed', {
+          durationMs, err: err?.message, inFlight: inFlightSpawns, maxConcurrentSpawns,
+        });
+      }
+      resolve(result);
+    };
     try {
-      const tmpPath = path.join(os.tmpdir(), `inkwell_icon_${Date.now()}.png`);
+      // hrtime suffix avoids tmp-path collisions when polls fire within the same ms
+      const tmpPath = path.join(os.tmpdir(), `inkwell_icon_${Date.now()}_${process.hrtime.bigint()}.png`);
       execFile('/usr/bin/sips', [
         '-s', 'format', 'png',
         '-z', '32', '32',
         icnsPath,
         '--out', tmpPath,
       ], { timeout: 2000 }, (err) => {
-        if (err) {
-          resolve(null);
-          return;
-        }
+        if (err) return finish(null, err);
         try {
           if (fs.existsSync(tmpPath)) {
             const buf = fs.readFileSync(tmpPath);
             try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
             if (buf.length > 100 &&
                 buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-              resolve(`data:image/png;base64,${buf.toString('base64')}`);
-              return;
+              return finish(`data:image/png;base64,${buf.toString('base64')}`);
             }
           }
         } catch { /* ignore */ }
-        resolve(null);
+        finish(null);
       });
-    } catch {
-      resolve(null);
+    } catch (err) {
+      finish(null, err as Error);
     }
   });
 }

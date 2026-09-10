@@ -1,7 +1,12 @@
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, shell, crashReporter } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+
+// Must be started as early as possible — captures native/hardware-exception
+// crashes in the main process that no JS handler can ever see.
+crashReporter.start({ uploadToServer: false, compress: true });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.setName('Inkwell');
@@ -321,7 +326,9 @@ app.whenReady().then(() => {
   }, 2000);
 
   logger.info('main', 'Initialization complete');
+  logger.info('main', 'Crash reporter active', { crashDumpsDir: app.getPath('crashDumps') });
   logger.startHeartbeat();
+  startMemoryGuard();
 
   app.on('activate', () => {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
@@ -333,6 +340,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', (event) => {
+  if (memoryGuardTimer) clearInterval(memoryGuardTimer);
   // On macOS, prevent quitting unless requestQuit() was explicitly called (e.g. from Tray menu)
   if (!getIsQuitting() && process.platform === 'darwin') {
     logger.debug('main', 'before-quit intercepted — hiding window because quit was not requested');
@@ -370,3 +378,44 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+// ── Proactive OOM guard ───────────────────────────────────────────────────
+// macOS jetsam SIGKILL is uncatchable. Instead of waiting to be killed
+// silently, self-relaunch cleanly (logged, DB closed, heartbeat marked)
+// once memory pressure crosses a threshold we choose.
+const MEMORY_CRITICAL_MB = 300;
+const FREE_MEM_CRITICAL_RATIO = 0.06;
+let memoryGuardTimer: ReturnType<typeof setInterval> | null = null;
+
+function startMemoryGuard(): void {
+  memoryGuardTimer = setInterval(() => {
+    const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    const freeMemRatio = os.freemem() / os.totalmem();
+    if (rssMb > MEMORY_CRITICAL_MB || freeMemRatio < FREE_MEM_CRITICAL_RATIO) {
+      logger.error('main', 'Memory pressure critical — self-relaunching before likely OS force-kill', {
+        rssMb,
+        freeMemRatio: Math.round(freeMemRatio * 1000) / 1000,
+      });
+      setIsQuitting(true);
+      stopPermissionWatcher();
+      stopActiveAppTracker();
+      stopCapture();
+      closeDatabase();
+      logger.logShutdown('proactive-oom-guard-relaunch');
+      logger.close();
+      app.relaunch();
+      app.exit(0);
+    }
+  }, 20_000);
+}
+
+// ── Event-loop lag watchdog ───────────────────────────────────────────────
+let lastTick = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const drift = now - lastTick - 1000;
+  if (drift > 500) {
+    logger.warn('main', `Event loop lag detected: ${drift}ms`, { drift });
+  }
+  lastTick = now;
+}, 1000);

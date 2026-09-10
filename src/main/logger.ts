@@ -124,23 +124,61 @@ interface HeartbeatPayload {
   shutdownReason?: string;
   shutdownAt?: string;
   uptimeSeconds?: number;
+  rssMb?: number;
+  heapUsedMb?: number;
+  externalMb?: number;
+  freeMemRatio?: number;
+  activeHandles?: number;
+  activeRequests?: number;
   lastError?: unknown;
 }
 
 function writeHeartbeatFile(extra?: Partial<HeartbeatPayload>): void {
   try {
     ensureLogDir();
+    const mem = process.memoryUsage();
     const payload: HeartbeatPayload = {
       runId,
       pid: process.pid,
       lastHeartbeatAt: new Date().toISOString(),
       uptimeSeconds: Math.round(process.uptime()),
+      rssMb: Math.round(mem.rss / 1024 / 1024),
+      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+      externalMb: Math.round(mem.external / 1024 / 1024),
+      freeMemRatio: Math.round((os.freemem() / os.totalmem()) * 1000) / 1000,
+      activeHandles: (process as any)._getActiveHandles?.().length ?? -1,
+      activeRequests: (process as any)._getActiveRequests?.().length ?? -1,
       ...extra,
     };
     fs.writeFileSync(currentHeartbeatFile, JSON.stringify(payload, null, 2), 'utf-8');
+    if ((payload.rssMb ?? 0) > 250 || (payload.freeMemRatio ?? 1) < 0.08) {
+      writeSync('WARN', 'lifecycle', 'Elevated memory pressure at heartbeat', payload);
+    }
   } catch {
     // Heartbeat failure must never affect the app
   }
+}
+
+// ── Postmortem: scan for native crash evidence macOS may have generated ─────
+function scanForNativeCrashEvidence(sinceMs: number): string[] {
+  const found: string[] = [];
+  const dirs = [
+    path.join(os.homedir(), 'Library', 'Logs', 'DiagnosticReports'),
+    path.join(os.homedir(), 'Library', 'Application Support', 'Inkwell', 'Crashpad', 'completed'),
+  ];
+  for (const dir of dirs) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (!/inkwell|electron/i.test(f)) continue;
+        const full = path.join(dir, f);
+        if (fs.statSync(full).mtimeMs >= sinceMs) found.push(full);
+      }
+    } catch {
+      // Ignore unreadable dirs
+    }
+  }
+  return found;
 }
 
 function startHeartbeat(): void {
@@ -254,15 +292,22 @@ export const logger = {
     const prev = readPreviousHeartbeat();
     if (prev && typeof prev.runId === 'string' && prev.runId !== runId) {
       if (!prev.cleanShutdown) {
+        const lastBeatMs = prev.lastHeartbeatAt ? Date.parse(prev.lastHeartbeatAt) : Date.now();
+        const evidence = scanForNativeCrashEvidence(lastBeatMs - 5000);
         writeSync(
           'ERROR',
           'lifecycle',
-          'Previous session ended unexpectedly (unclean shutdown / crash detected)',
+          evidence.length
+            ? 'Previous session ended unexpectedly — native crash evidence found'
+            : 'Previous session ended unexpectedly — no native crash report found (likely OS-level SIGKILL / jetsam OOM kill)',
           {
             previousRunId: prev.runId,
             previousPid: prev.pid,
             lastHeartbeatAt: prev.lastHeartbeatAt,
+            lastKnownRssMb: prev.rssMb,
+            lastKnownFreeMemRatio: prev.freeMemRatio,
             lastError: prev.lastError,
+            crashEvidenceFiles: evidence,
           }
         );
       } else {
