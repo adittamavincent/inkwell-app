@@ -6,7 +6,7 @@
   "author": "Vincent",
   "main": "dist-electron/main/index.js",
   "scripts": {
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "export PYTHON=/usr/bin/python3 && electron-builder install-app-deps",
     "dev": "vite",
     "compile": "tsc && vite build",
     "prebuild": "pnpm run compile",
