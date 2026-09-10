@@ -4,4 +4,5 @@ allowBuilds:
   electron: true
   esbuild: true
   node-mac-permissions: true
+  sharp: true
   uiohook-napi: true
