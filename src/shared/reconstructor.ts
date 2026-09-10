@@ -59,8 +59,11 @@ export function reconstructText(tokens: string[]): string {
         content = rawToken.slice(7, -1);
       }
       lastPastedContent = content;
-      // Plain paste: insert content directly without backtick fence
-      const chars = content.split('');
+      // Enclose pasted content with backtick code fence (```\ncontent\n```)
+      const fence = '```';
+      const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
+      const snippet = `${prefix}${fence}\n${content}\n${fence}\n`;
+      const chars = snippet.split('');
       buffer.splice(cursor, 0, ...chars);
       cursor += chars.length;
       continue;

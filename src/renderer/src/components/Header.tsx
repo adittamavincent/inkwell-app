@@ -32,9 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Left: Branding & Informational Status */}
       <div className="flex items-center gap-3 titlebar-no-drag">
         <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded bg-gradient-to-br from-[#163b54] to-[#1f6f78] flex items-center justify-center text-ink-text shadow-sm shadow-black/40">
-            <AppIcon className="w-3.5 h-3.5 text-ink-accent-light" />
-          </div>
+          <AppIcon className="w-5 h-5 rounded drop-shadow-sm" />
           <span className="font-serif text-sm font-semibold text-ink-text">
             Inkwell
           </span>

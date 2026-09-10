@@ -18,18 +18,66 @@ export const AppIcon: React.FC<IconProps> = ({ className = 'w-5 h-5', size, ...p
     height={size}
     {...props}
   >
-    <path
-      d="M720 180C600 180 440 280 340 440C270 552 236 676 220 804C288 780 368 732 440 660C548 552 640 400 700 290C724 246 736 210 720 180Z"
-      fill="currentColor"
-    />
-    <path
-      d="M340 440L650 750M460 320L770 630"
-      stroke="currentColor"
-      strokeWidth="32"
-      strokeLinecap="round"
-      opacity="0.6"
-    />
-    <circle cx="280" cy="740" r="32" fill="currentColor" />
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="0.25" y2="1">
+        <stop offset="0" stopColor="#1a4560" />
+        <stop offset="1" stopColor="#1f6f78" />
+      </linearGradient>
+
+      <radialGradient id="bgGlow" cx="0.32" cy="0.22" r="0.85">
+        <stop offset="0" stopColor="#ffffff" stopOpacity="0.10" />
+        <stop offset="0.5" stopColor="#ffffff" stopOpacity="0.02" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+      </radialGradient>
+
+      <linearGradient id="nib" x1="0.15" y1="0" x2="0.85" y2="1">
+        <stop offset="0" stopColor="#ffffff" />
+        <stop offset="0.45" stopColor="#eef3f0" />
+        <stop offset="0.75" stopColor="#d3ded8" />
+        <stop offset="1" stopColor="#b9c7c0" />
+      </linearGradient>
+
+      <linearGradient id="nibShade" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stopColor="#8fa39c" stopOpacity="0.55" />
+        <stop offset="0.4" stopColor="#8fa39c" stopOpacity="0" />
+      </linearGradient>
+
+      <radialGradient id="highlight" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stopColor="#ffffff" stopOpacity="0.85" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+      </radialGradient>
+
+      <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#ffffff" stopOpacity="0.14" />
+        <stop offset="0.45" stopColor="#ffffff" stopOpacity="0" />
+      </linearGradient>
+
+      <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="10" stdDeviation="14" floodColor="#0b2530" floodOpacity="0.35" />
+      </filter>
+
+      <path
+        id="nibShape"
+        d="M 424 344 C 452 288, 500 264, 512 264 C 524 264, 572 288, 600 344 C 652 424, 636 486, 596 566 C 562 634, 530 706, 512 788 C 494 706, 462 634, 428 566 C 388 486, 372 424, 424 344 Z"
+      />
+
+      <mask id="nibCutout" maskUnits="userSpaceOnUse">
+        <use href="#nibShape" fill="#ffffff" />
+        <circle cx="512" cy="392" r="24" fill="#000000" />
+        <path d="M 506 392 L 518 392 L 512 800 Z" fill="#000000" />
+      </mask>
+    </defs>
+
+    <rect x="64" y="64" width="896" height="896" rx="208" ry="208" fill="url(#bg)" />
+    <rect x="64" y="64" width="896" height="896" rx="208" ry="208" fill="url(#bgGlow)" />
+
+    <g filter="url(#softShadow)" mask="url(#nibCutout)">
+      <use href="#nibShape" fill="url(#nib)" stroke="#a9b8b1" strokeWidth="3" />
+      <use href="#nibShape" fill="url(#nibShade)" />
+    </g>
+
+    <ellipse cx="470" cy="330" rx="34" ry="20" fill="url(#highlight)" transform="rotate(-35 470 330)" />
+    <rect x="64" y="64" width="896" height="896" rx="208" ry="208" fill="url(#sheen)" />
   </svg>
 );
 
