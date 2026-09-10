@@ -125,6 +125,38 @@ To open the app anyway:
 
    Then launch the app normally.
 
+### Troubleshooting: `hdiutil resize` failures
+
+During `pnpm run build` (or `electron-builder` packaging), you may occasionally encounter an error like:
+```text
+⨯ unable to execute hdiutil args=["resize","-size","...",...]
+hdiutil: resize: failed. Resource temporarily unavailable (35)
+```
+
+#### Cause
+This error (`Exit code: 35` / `EAGAIN`) is an OS-level resource contention issue on macOS. It happens when a previous build failed or was interrupted, leaving a stale mounted disk image or a lock held by `hdiutil` / `diskarbitrationd` in the temp directory (`/private/var/folders/.../T/`).
+
+#### Automatic Cleanup
+This repository includes an automatic pre-dist cleanup script (`scripts/predist-cleanup.sh`) hooked to `predist` in `package.json`. It runs automatically before `pnpm run build` to detect and force-detach stale mounted DMG volumes and remove residual temporary build directories.
+
+#### Manual Resolution (If cleanup is not enough)
+If `pnpm run build` still fails with error 35:
+
+1. **Check mounted disk images**:
+   ```bash
+   hdiutil info | grep -A5 "image-path"
+   ```
+2. **Force-detach any stale volumes**:
+   ```bash
+   hdiutil detach /dev/diskX -force
+   ```
+3. **Check available disk space**:
+   Ensure your boot volume (`/`) and temporary directory location have sufficient free disk space. Low disk space or inode pressure can cause sparse image resizing to fail.
+4. **Reboot**:
+   If `diskarbitrationd` or `hdiutil` remains locked, rebooting your Mac will clear all disk arbitration locks and temporary volume mounts.
+
+> **Note:** `dmg.format: 'ULFO'` is configured in `electron-builder.config.cjs` to use LZFSE compression for better stability on Apple Silicon toolchains, but it cannot override an active OS-level file lock.
+
 ---
 
 ## License

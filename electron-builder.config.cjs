@@ -27,6 +27,7 @@ module.exports = {
   },
   dmg: {
     sign: false,
+    format: 'ULFO',
     artifactName: '${productName}-${version}-mac-arm64.${ext}',
   },
 };
