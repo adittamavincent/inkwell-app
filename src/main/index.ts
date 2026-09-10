@@ -396,6 +396,12 @@ function startMemoryGuard(): void {
         rssMb,
         freeMemRatio: Math.round(freeMemRatio * 1000) / 1000,
       });
+
+      if (process.env.NODE_ENV !== 'production') {
+        logger.warn('main', 'Skipping OOM self-relaunch because app is running in non-production mode');
+        return;
+      }
+
       setIsQuitting(true);
       stopPermissionWatcher();
       stopActiveAppTracker();
