@@ -1,5 +1,5 @@
 import React from 'react';
-import { LucideIcon } from 'lucide-react';
+import { IconProps } from './Icons';
 
 export type IconButtonVariant =
   | 'default'
@@ -13,7 +13,7 @@ export type IconButtonVariant =
 export type IconButtonSize = 'sm' | 'md' | 'lg';
 
 export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  icon: LucideIcon | React.ReactNode;
+  icon: React.ComponentType<IconProps> | React.ReactNode;
   title: string;
   variant?: IconButtonVariant;
   size?: IconButtonSize;
@@ -60,7 +60,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
     if (React.isValidElement(IconComponent)) {
       return IconComponent;
     }
-    const Icon = IconComponent as LucideIcon;
+    const Icon = IconComponent as React.ComponentType<IconProps>;
     return <Icon className={sizeConfig.icon} />;
   };
 

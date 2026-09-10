@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldAlert, AlertTriangle, ExternalLink, KeyRound } from 'lucide-react';
+import { ShieldAlertIcon, AlertTriangleIcon, ExternalLinkIcon, KeyRoundIcon } from './Icons';
 import { AuthStatus } from '../types';
 import { IconButton } from './IconButton';
 
@@ -32,7 +32,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
     return (
       <div className="bg-amber-950/40 border-b border-amber-800/40 px-4 py-2 flex items-center justify-between text-xs text-amber-200 select-none">
         <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+          <ShieldAlertIcon className="w-4 h-4 text-amber-400 shrink-0" />
           <span className="leading-tight">
             <strong className="font-semibold text-amber-100">Accessibility Required:</strong> Inkwell cannot detect active applications until granted in System Settings.
           </span>
@@ -40,7 +40,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
         <div className="flex items-center gap-1.5 ml-4 shrink-0">
           {!isDenied && (
             <IconButton
-              icon={KeyRound}
+              icon={KeyRoundIcon}
               title="Prompt macOS permission request"
               variant="warning"
               size="sm"
@@ -48,7 +48,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
             />
           )}
           <IconButton
-            icon={ExternalLink}
+            icon={ExternalLinkIcon}
             title="Open macOS Privacy & Security -> Accessibility"
             variant="warning"
             size="sm"
@@ -64,7 +64,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
   return (
     <div className="bg-amber-950/40 border-b border-amber-800/40 px-4 py-2 flex items-center justify-between text-xs text-amber-200 select-none">
       <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+        <AlertTriangleIcon className="w-4 h-4 text-amber-400 shrink-0" />
         <span className="leading-tight">
           <strong className="font-semibold text-amber-100">Input Monitoring Required:</strong> Accessibility is active, but Input Monitoring must be authorized to record strokes.
         </span>
@@ -72,7 +72,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
       <div className="flex items-center gap-1.5 ml-4 shrink-0">
         {!isInputDenied && (
           <IconButton
-            icon={KeyRound}
+            icon={KeyRoundIcon}
             title="Prompt macOS permission request"
             variant="warning"
             size="sm"
@@ -80,7 +80,7 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
           />
         )}
         <IconButton
-          icon={ExternalLink}
+          icon={ExternalLinkIcon}
           title="Open macOS Privacy & Security -> Input Monitoring"
           variant="warning"
           size="sm"

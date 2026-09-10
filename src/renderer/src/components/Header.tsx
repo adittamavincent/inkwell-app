@@ -1,5 +1,5 @@
 import React from 'react';
-import { Feather, Play, Pause, Copy, Check, Trash2, SlidersHorizontal } from 'lucide-react';
+import { AppIcon, PlayIcon, PauseIcon, CopyIcon, CheckIcon, TrashIcon, SettingsIcon } from './Icons';
 import { IconButton } from './IconButton';
 
 interface HeaderProps {
@@ -33,7 +33,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-3 titlebar-no-drag">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 rounded bg-gradient-to-br from-[#163b54] to-[#1f6f78] flex items-center justify-center text-ink-text shadow-sm shadow-black/40">
-            <Feather className="w-3 h-3 text-ink-accent-light" />
+            <AppIcon className="w-3.5 h-3.5 text-ink-accent-light" />
           </div>
           <span className="font-serif text-sm font-semibold text-ink-text">
             Inkwell
@@ -77,28 +77,28 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right: Actions (Icon-only, borderless buttons) */}
       <div className="flex items-center gap-1 titlebar-no-drag">
         <IconButton
-          icon={isRunning ? Pause : Play}
+          icon={isRunning ? PauseIcon : PlayIcon}
           title={isRunning ? 'Pause capture' : 'Resume capture'}
           variant={isRunning ? 'default' : 'warning'}
           onClick={onToggleCapture}
         />
 
         <IconButton
-          icon={isCopied ? Check : Copy}
+          icon={isCopied ? CheckIcon : CopyIcon}
           title={isCopied ? 'Copied buffer to clipboard' : 'Copy buffer'}
           variant={isCopied ? 'success' : 'default'}
           onClick={onCopyAll}
         />
 
         <IconButton
-          icon={Trash2}
+          icon={TrashIcon}
           title="Clear all stored keystrokes"
           variant="danger"
           onClick={onClear}
         />
 
         <IconButton
-          icon={SlidersHorizontal}
+          icon={SettingsIcon}
           title="Vault Sync Settings"
           active={isSettingsOpen}
           onClick={onToggleSettings}

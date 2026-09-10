@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Copy, Check, Code2 } from 'lucide-react';
+import { CopyIcon, CheckIcon, CodeIcon } from './Icons';
 
 interface RichContentTextProps {
   text: string;
@@ -232,7 +232,7 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] bg-ink-card/95 hover:bg-ink-hover border border-ink-accent/40 hover:border-ink-accent text-ink-text transition-all shadow-xs cursor-pointer select-none max-w-full"
       >
         <span className="text-ink-accent-light font-bold flex items-center gap-1 shrink-0">
-          <Code2 className="w-3.5 h-3.5 text-ink-accent-light" />
+          <CodeIcon className="w-3.5 h-3.5 text-ink-accent-light" />
           <span>{segment.fence}</span>
         </span>
 
@@ -249,11 +249,11 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
         <span className="shrink-0 ml-1 flex items-center">
           {isCopied ? (
             <span className="inline-flex items-center gap-0.5 text-emerald-400 text-[10px] font-sans font-medium">
-              <Check className="w-3 h-3" />
+              <CheckIcon className="w-3 h-3" />
               <span>Copied</span>
             </span>
           ) : (
-            <Copy className="w-3 h-3 text-ink-muted group-hover:text-ink-accent-light transition-colors" />
+            <CopyIcon className="w-3 h-3 text-ink-muted group-hover:text-ink-accent-light transition-colors" />
           )}
         </span>
       </button>
@@ -263,7 +263,7 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
         <div className="absolute left-0 bottom-full mb-2 z-50 min-w-[260px] max-w-[440px] bg-ink-sidebar/95 backdrop-blur-md rounded-lg border border-ink-border shadow-2xl p-2.5 text-left pointer-events-auto">
           <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-ink-border text-[10px] text-ink-muted select-none">
             <span className="font-medium text-ink-accent-light flex items-center gap-1">
-              <Code2 className="w-3 h-3" />
+              <CodeIcon className="w-3 h-3" />
               <span>{segment.fence} Snippet ({cleanCode.length} chars)</span>
             </span>
             <span className="text-ink-faint">Click chip to copy</span>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CogdexSyncConfig, SyncResponse } from '../types';
-import { X, RefreshCw, Check, Save } from 'lucide-react';
+import { CloseIcon, RefreshIcon, CheckIcon, SaveIcon } from './Icons';
 import { IconButton } from './IconButton';
 
 interface SettingsDrawerProps {
@@ -79,7 +79,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
         <span className="font-serif text-sm font-semibold text-ink-text">
           Vault Sync & Engine
         </span>
-        <IconButton icon={X} title="Close settings" onClick={onClose} size="sm" />
+        <IconButton icon={CloseIcon} title="Close settings" onClick={onClose} size="sm" />
       </div>
 
       {/* Form Content */}
@@ -222,7 +222,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             disabled={isSaving}
             className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-ink-panel hover:bg-ink-hover text-ink-text font-medium transition-colors text-xs select-none disabled:opacity-40 cursor-pointer"
           >
-            {saveSuccess ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Save className="w-3.5 h-3.5" />}
+            {saveSuccess ? <CheckIcon className="w-3.5 h-3.5 text-emerald-400" /> : <SaveIcon className="w-3.5 h-3.5" />}
             <span>{saveSuccess ? 'Saved' : 'Save Config'}</span>
           </button>
 
@@ -232,7 +232,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             disabled={isSyncing}
             className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-ink-accent hover:bg-ink-accent-hover text-white font-medium transition-colors text-xs select-none disabled:opacity-40 cursor-pointer shadow-sm"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <RefreshIcon className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Syncing...' : 'Force Sync'}</span>
           </button>
         </div>

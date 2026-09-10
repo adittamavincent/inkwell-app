@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SessionPreview } from '../types';
-import { Copy, Check, Trash2, Clock } from 'lucide-react';
+import { CopyIcon, CheckIcon, TrashIcon, ClockIcon } from './Icons';
 import { IconButton } from './IconButton';
 import { RichContentText } from './RichContentText';
 
@@ -122,7 +122,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             {/* Hover Actions: Copy and Delete */}
             <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 select-none flex items-center gap-0.5">
               <IconButton
-                icon={isItemCopied ? Check : Copy}
+                icon={isItemCopied ? CheckIcon : CopyIcon}
                 title={isItemCopied ? 'Copied' : 'Copy session text'}
                 variant={isItemCopied ? 'success' : 'ghost'}
                 size="sm"
@@ -130,7 +130,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               />
               {onDeleteSession && (
                 <IconButton
-                  icon={Trash2}
+                  icon={TrashIcon}
                   title="Delete session entry"
                   variant="ghost"
                   size="sm"
@@ -166,7 +166,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               setContextMenu(null);
             }}
           >
-            <Copy className="w-3.5 h-3.5 text-ink-accent-light" />
+            <CopyIcon className="w-3.5 h-3.5 text-ink-accent-light" />
             <span>Copy Session Text</span>
           </button>
 
@@ -178,7 +178,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               setContextMenu(null);
             }}
           >
-            <Clock className="w-3.5 h-3.5 text-ink-muted" />
+            <ClockIcon className="w-3.5 h-3.5 text-ink-muted" />
             <span>Copy Timestamp</span>
           </button>
 
@@ -193,7 +193,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   setContextMenu(null);
                 }}
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <TrashIcon className="w-3.5 h-3.5" />
                 <span className="font-medium">Delete Entry</span>
               </button>
             </>
