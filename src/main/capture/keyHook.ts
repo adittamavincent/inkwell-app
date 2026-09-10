@@ -21,6 +21,23 @@ let isRunning = false;
 const queue: QueuedKeystroke[] = [];
 let isProcessingQueue = false;
 const recentKeys: string[] = [];
+let lastSeenApp = '';
+
+function getSafeClipboardText(): string | null {
+  try {
+    const availableFormats = clipboard.availableFormats();
+    if (availableFormats.includes('org.nspasteboard.ConcealedType')) {
+      return null;
+    }
+    const text = clipboard.readText();
+    if (text.length > 5000) {
+      return null;
+    }
+    return text;
+  } catch {
+    return null;
+  }
+}
 
 // Background sync: runs every 5s while capture is active
 let syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -144,6 +161,15 @@ function handleKeyDown(e: UiohookKeyboardEventLike): void {
 }
 
 function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
+  // getFrontmostAppName() reads from a 250 ms cache populated by the
+  // polling tracker. Avoid triggering refreshActiveApp() here — it touches
+  // activeWin(), fetchAppIcon(), sips, and app.getFileIcon().
+  const appName = getFrontmostAppName();
+  if (appName !== lastSeenApp) {
+    lastSeenApp = appName;
+    recentKeys.length = 0;
+  }
+
   updateModifiers(e.keycode, true);
 
   const token = mapKeyEventToToken(e, modifiers);
@@ -182,11 +208,6 @@ function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
     recentKeys.pop();
   }
 
-  // getFrontmostAppName() reads from a 250 ms cache populated by the
-  // polling tracker. Avoid triggering refreshActiveApp() here — it touches
-  // activeWin(), fetchAppIcon(), sips, and app.getFileIcon().
-  const appName = getFrontmostAppName();
-
   if (isAppExcluded(appName, config.excludedApps)) {
     return;
   }
@@ -201,7 +222,7 @@ function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
     });
     setImmediate(() => {
       try {
-        const clipText = clipboard.readText();
+        const clipText = getSafeClipboardText();
         if (clipText) {
           const b64 = Buffer.from(clipText, 'utf8').toString('base64');
           if (clipTrigger === 'paste') {

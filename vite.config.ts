@@ -25,9 +25,10 @@ export default defineConfig({
           options.startup();
         },
         vite: {
-          build: {
-            outDir: path.join(__dirname, 'dist-electron/main'),
-            rollupOptions: {
+            build: {
+              outDir: path.join(__dirname, 'dist-electron/main'),
+              emptyOutDir: true,
+              rollupOptions: {
               external: [
                 'electron',
                 'better-sqlite3',
