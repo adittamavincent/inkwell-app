@@ -183,7 +183,7 @@ function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
   // thread — calling Cocoa APIs from there causes EXC_BREAKPOINT / SIGTRAP.
   let finalToken = token;
   let needsClipRead = false;
-  let clipTrigger: 'paste' | 'q3q' | 'q4q' | null = null;
+  let clipTrigger: 'paste' | 'q3q' | 'q4q' | 'qnq' | null = null;
 
   if (token === '[⌘V]') {
     needsClipRead = true;
@@ -194,10 +194,11 @@ function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
       lower === 'q' &&
       recentKeys.length >= 2 &&
       recentKeys[recentKeys.length - 2] === 'q' &&
-      (recentKeys[recentKeys.length - 1] === '3' || recentKeys[recentKeys.length - 1] === '4')
+      /^[0-9a-zA-Z]$/.test(recentKeys[recentKeys.length - 1])
     ) {
       needsClipRead = true;
-      clipTrigger = recentKeys[recentKeys.length - 1] === '3' ? 'q3q' : 'q4q';
+      const middleKey = recentKeys[recentKeys.length - 1];
+      clipTrigger = middleKey === '3' ? 'q3q' : middleKey === '4' ? 'q4q' : 'qnq';
     }
 
     recentKeys.push(lower);

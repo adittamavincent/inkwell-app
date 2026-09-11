@@ -11,7 +11,7 @@ import {
   SyncResponse,
   PermissionStatus,
 } from './types';
-import { reconstructText } from '../../shared/reconstructor';
+import { reconstructText, stripChipMarkers } from '../../shared/reconstructor';
 import { DEFAULT_CONFIG, CogdexSyncConfig } from '../../shared/constants';
 
 export const App: React.FC = () => {
@@ -270,7 +270,7 @@ export const App: React.FC = () => {
 
   const handleCopyText = async (text: string) => {
     if (!window.inkwellApi) return;
-    await window.inkwellApi.copyToClipboard(text);
+    await window.inkwellApi.copyToClipboard(stripChipMarkers(text));
   };
 
   const handleCopyAll = async () => {
@@ -278,11 +278,11 @@ export const App: React.FC = () => {
     let fullPreview = '';
     if (liveText.trim()) {
       const timeStr = liveStart ? new Date(liveStart).toLocaleTimeString() : '';
-      fullPreview += `${timeStr} · ${liveApp || 'Live'}\n${liveText}\n\n`;
+      fullPreview += `${timeStr} · ${liveApp || 'Live'}\n${stripChipMarkers(liveText)}\n\n`;
     }
     for (const s of history) {
       const timeStr = new Date(s.start).toLocaleTimeString();
-      fullPreview += `${timeStr} · ${s.app}\n${s.text}\n\n`;
+      fullPreview += `${timeStr} · ${s.app}\n${stripChipMarkers(s.text)}\n\n`;
     }
 
     await window.inkwellApi.copyToClipboard(fullPreview.trim());

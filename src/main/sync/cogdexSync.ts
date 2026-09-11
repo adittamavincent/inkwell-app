@@ -6,6 +6,8 @@ import { groupSessions, SessionPreview } from './sessionGrouper';
 import { getLastSync, writeLastSync } from './watermark';
 import { logger } from '../logger';
 
+import { stripChipMarkers } from './reconstructor';
+
 function formatStrftime(pattern: string, date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, '0');
   const Y = date.getFullYear().toString();
@@ -34,7 +36,7 @@ function buildSessionBlocks(sessions: SessionPreview[]): string[] {
     const startDate = s.start instanceof Date ? s.start : new Date(s.start);
     const headerTime = `${pad(startDate.getHours())}:${pad(startDate.getMinutes())}`;
     const header = s.app ? `## ${headerTime} — ${s.app}` : `## ${headerTime}`;
-    return `${header}\n\n${s.text}\n`;
+    return `${header}\n\n${stripChipMarkers(s.text)}\n`;
   });
 }
 

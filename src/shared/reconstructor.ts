@@ -3,6 +3,44 @@
  * Shared between main process (sync) and renderer (live feed).
  */
 
+export type ChipCategory = 'regular' | 'qNq';
+
+export const CHIP_START_REGULAR = '\u001DPASTE:regular\u001E';
+export const CHIP_START_QNQ = '\u001DPASTE:qNq\u001E';
+export const CHIP_END = '\u001F';
+
+/**
+ * Strips leading and trailing backticks from pasted/snippet content.
+ */
+export function trimBackticks(str: string): string {
+  if (!str) return '';
+  return str.replace(/^`+|`+$/g, '');
+}
+
+/**
+ * Builds an internal chip representation.
+ * - regular: PASTED
+ * - qNq: \nPASTED\n
+ */
+export function makeChip(category: ChipCategory, content: string): string {
+  const clean = trimBackticks(content);
+  if (category === 'qNq') {
+    return `\n${CHIP_START_QNQ}${clean}${CHIP_END}\n`;
+  }
+  return `${CHIP_START_REGULAR}${clean}${CHIP_END}`;
+}
+
+/**
+ * Strips all internal chip markers to return plain text identical
+ * to what appears in universal text editors.
+ */
+export function stripChipMarkers(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\u001DPASTE:(?:regular|qNq)\u001E([\s\S]*?)\u001F/g, '$1')
+    .replace(/«chip:(?:regular|qNq)»([\s\S]*?)«\/chip»/g, '$1');
+}
+
 function isAlphanumeric(ch: string): boolean {
   return /^[a-zA-Z0-9]$/.test(ch);
 }
@@ -36,12 +74,9 @@ function decodeBase64Safe(b64: string): string {
   return '';
 }
 
-function buildEnclosure(content: string, fenceCount: number): string {
-  if (fenceCount === 1) {
-    return `\`${content}\``;
-  }
-  const fence = '`'.repeat(fenceCount);
-  return `${fence}\n${content}\n${fence}\n`;
+interface BufferSnapshot {
+  buffer: string[];
+  cursor: number;
 }
 
 export function reconstructText(tokens: string[]): string {
@@ -49,34 +84,19 @@ export function reconstructText(tokens: string[]): string {
   let cursor = 0;
   let selection: [number, number] | null = null;
   let lastPastedContent = '';
-  let lastPasteRange: [number, number] | null = null;
 
-  const applyQSnippet = (content: string, fenceCount: number, customTriggerLength?: number) => {
-    let replaceStart: number;
-    let replaceEnd: number;
+  // History stack of buffer snapshots for exact undo ([⌘Z]) reproduction
+  const historyStack: BufferSnapshot[] = [];
 
-    if (lastPasteRange) {
-      replaceStart = lastPasteRange[0];
-      replaceEnd = cursor;
-    } else {
-      if (customTriggerLength && customTriggerLength > 0 && cursor >= customTriggerLength) {
-        replaceStart = cursor - customTriggerLength;
-      } else {
-        replaceStart = cursor;
-      }
-      replaceEnd = cursor;
+  const saveSnapshot = () => {
+    historyStack.push({
+      buffer: [...buffer],
+      cursor,
+    });
+    // Limit history stack size to prevent unbounded memory growth in huge sessions
+    if (historyStack.length > 500) {
+      historyStack.shift();
     }
-
-    buffer.splice(replaceStart, replaceEnd - replaceStart);
-    cursor = replaceStart;
-
-    const prefix = cursor > 0 && buffer[cursor - 1] !== '\n' ? '\n' : '';
-    const snippet = `${prefix}${buildEnclosure(content, fenceCount)}`;
-    const chars = snippet.split('');
-    buffer.splice(cursor, 0, ...chars);
-    cursor += chars.length;
-
-    lastPasteRange = null;
   };
 
   for (const rawToken of tokens) {
@@ -84,6 +104,7 @@ export function reconstructText(tokens: string[]): string {
 
     // 1. Paste Token: [PASTE:b64:<data>] or [PASTE:<data>]
     if (rawToken.startsWith('[PASTE:')) {
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -96,74 +117,101 @@ export function reconstructText(tokens: string[]): string {
         content = rawToken.slice(7, -1);
       }
       lastPastedContent = content;
-      const startIdx = cursor;
-      const inlineEnclosure = buildEnclosure(content, 1);
-      const chars = inlineEnclosure.split('');
-      buffer.splice(cursor, 0, ...chars);
-      cursor += chars.length;
-      lastPasteRange = [startIdx, cursor];
+
+      const chip = makeChip('regular', content);
+      buffer.splice(cursor, 0, chip);
+      cursor += 1;
       continue;
     }
 
-    // 2. Explicit Q3Q / Q4Q Snippet Tokens: [Q3Q:b64:...] or [Q4Q:b64:...]
-    if (rawToken.startsWith('[Q3Q:') || rawToken.startsWith('[Q4Q:')) {
+    // 2. Explicit QnQ Snippet Tokens: [Q3Q:...], [Q4Q:...], [QNQ:...], [Q...Q:...]
+    if (/^\[Q[0-9a-zA-Z]+Q:/.test(rawToken)) {
       if (selection) {
+        saveSnapshot();
         cursor = deleteSelection(buffer, selection);
         selection = null;
       }
-      const isQ3 = rawToken.startsWith('[Q3Q:');
-      const fenceCount = isQ3 ? 3 : 4;
-      let content = lastPastedContent;
 
-      if (rawToken.startsWith('[Q3Q:b64:') || rawToken.startsWith('[Q4Q:b64:')) {
-        const b64 = rawToken.slice(9, -1);
-        const decoded = decodeBase64Safe(b64);
+      let content = lastPastedContent;
+      const b64Match = rawToken.match(/^\[Q[0-9a-zA-Z]+Q:b64:(.*)\]$/);
+      if (b64Match) {
+        const decoded = decodeBase64Safe(b64Match[1]);
         if (decoded) {
           content = decoded;
           lastPastedContent = decoded;
         }
+      } else {
+        const directMatch = rawToken.match(/^\[Q[0-9a-zA-Z]+Q:(.*)\]$/);
+        if (directMatch && directMatch[1]) {
+          content = directMatch[1];
+          lastPastedContent = directMatch[1];
+        }
       }
 
-      let triggerLen = 0;
+      // Check if macro trigger (e.g. 'q3' or 'q4') exists right before cursor in buffer
       if (
         cursor >= 2 &&
         (buffer[cursor - 2] === 'q' || buffer[cursor - 2] === 'Q') &&
-        (buffer[cursor - 1] === '3' || buffer[cursor - 1] === '4')
+        /^[0-9a-zA-Z]$/.test(buffer[cursor - 1])
       ) {
-        triggerLen = 2;
+        buffer.splice(cursor - 2, 2);
+        cursor -= 2;
+        if (historyStack.length >= 2) {
+          historyStack.pop();
+          historyStack.pop();
+        }
+        saveSnapshot();
+      } else {
+        saveSnapshot();
       }
 
-      applyQSnippet(content, fenceCount, triggerLen);
+      const chip = makeChip('qNq', content);
+      buffer.splice(cursor, 0, chip);
+      cursor += 1;
       continue;
     }
 
-    // Single character (not a control token)
+    // Single character (not a bracketed control token)
     const isSingleChar = rawToken.length === 1 && !rawToken.startsWith('[');
 
     if (isSingleChar) {
-      if (selection) {
-        cursor = deleteSelection(buffer, selection);
-        selection = null;
-      }
-
-      // Universal q3q / q4q snippet detection:
-      // When typing 'q' or 'Q', check if preceding buffer characters are 'q3' / 'q4'
+      // Universal qNq snippet detection when user types 'q' closing macro e.g. 'q3' + 'q'
       const lowerChar = rawToken.toLowerCase();
       if (
         lowerChar === 'q' &&
         cursor >= 2 &&
         (buffer[cursor - 2] === 'q' || buffer[cursor - 2] === 'Q') &&
-        (buffer[cursor - 1] === '3' || buffer[cursor - 1] === '4')
+        /^[0-9a-zA-Z]$/.test(buffer[cursor - 1])
       ) {
-        const fenceCount = buffer[cursor - 1] === '3' ? 3 : 4;
-        applyQSnippet(lastPastedContent, fenceCount, 2);
+        if (selection) {
+          cursor = deleteSelection(buffer, selection);
+          selection = null;
+        }
+        buffer.splice(cursor - 2, 2);
+        cursor -= 2;
+        if (historyStack.length >= 2) {
+          historyStack.pop();
+          historyStack.pop();
+        }
+        saveSnapshot();
+
+        const chip = makeChip('qNq', lastPastedContent);
+        buffer.splice(cursor, 0, chip);
+        cursor += 1;
         continue;
+      }
+
+      saveSnapshot();
+      if (selection) {
+        cursor = deleteSelection(buffer, selection);
+        selection = null;
       }
 
       buffer.splice(cursor, 0, rawToken);
       cursor += 1;
     } else if (rawToken === '[⌫]') {
       // Backspace
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -173,6 +221,7 @@ export function reconstructText(tokens: string[]): string {
       }
     } else if (rawToken === '[⌦]') {
       // Forward delete
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -181,6 +230,7 @@ export function reconstructText(tokens: string[]): string {
       }
     } else if (rawToken === '[↵]') {
       // Newline
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -200,6 +250,7 @@ export function reconstructText(tokens: string[]): string {
       selection = null;
     } else if (rawToken === '[⇥]') {
       // Tab
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -223,6 +274,7 @@ export function reconstructText(tokens: string[]): string {
       cursor = newCursor;
     } else if (rawToken === '[⌘⌫]') {
       // Command + Backspace: delete to start of line
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -238,6 +290,7 @@ export function reconstructText(tokens: string[]): string {
       }
     } else if (rawToken === '[⌥⌫]') {
       // Option + Backspace: delete previous word
+      saveSnapshot();
       if (selection) {
         cursor = deleteSelection(buffer, selection);
         selection = null;
@@ -265,7 +318,14 @@ export function reconstructText(tokens: string[]): string {
         }
       }
     } else if (rawToken === '[⌘Z]') {
-      // Undo token: safe no-op
+      // Command + Z: Undo last mutation (including paste / snippet / characters)
+      if (historyStack.length > 0) {
+        const last = historyStack.pop()!;
+        buffer.length = 0;
+        buffer.push(...last.buffer);
+        cursor = Math.min(last.cursor, buffer.length);
+        selection = null;
+      }
     }
     // Any other unknown bracketed tokens are safely ignored
   }

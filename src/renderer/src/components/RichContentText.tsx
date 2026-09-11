@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { CopyIcon, CheckIcon, CodeIcon } from './Icons';
+import { trimBackticks } from '../../../shared/reconstructor';
 
 interface RichContentTextProps {
   text: string;
@@ -7,20 +8,20 @@ interface RichContentTextProps {
   onCopyText?: (text: string) => void;
 }
 
-interface CodeSegment {
-  type: 'code';
-  fence: string;
-  language: string;
-  code: string;
-  raw: string;
+export type ChipCategory = 'regular' | 'qNq';
+
+export interface ChipSegment {
+  type: 'chip';
+  category: ChipCategory;
+  content: string;
 }
 
-interface TextSegment {
+export interface TextSegment {
   type: 'text';
   content: string;
 }
 
-type Segment = CodeSegment | TextSegment;
+export type Segment = ChipSegment | TextSegment;
 
 /**
  * Tokenize code string into syntax-highlighted React elements.
@@ -113,104 +114,95 @@ function renderSyntaxHighlighted(code: string): React.ReactNode {
 }
 
 /**
- * Parses a string into text and code/pasted blocks (```, ````, ~~~, ~~~~).
- * Strictly bounds code snippets so text typed after closing fences is never swallowed.
+ * Parses a string into text and clickable chip segments { regular, qNq }.
+ * Strips leading/trailing backticks and detects both internal chip markers
+ * and legacy fence wrappers cleanly.
  */
-function parseSegments(rawText: string): Segment[] {
+export function parseSegments(rawText: string): Segment[] {
   if (!rawText) return [];
 
   const segments: Segment[] = [];
-  let currentIndex = 0;
+  const markerRegex =
+    /\u001DPASTE:(regular|qNq)\u001E([\s\S]*?)\u001F|«chip:(regular|qNq)»([\s\S]*?)«\/chip»|(`{3,4}|~{3,4})([\s\S]*?)\5/g;
 
-  // Regex to find start of code fence at start of string or beginning of a line
-  const openFenceRegex = /(?:^|\n)(`{3,4}|~{3,4})([a-zA-Z0-9_-]*)(?:\n|$)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
 
-  while (currentIndex < rawText.length) {
-    openFenceRegex.lastIndex = currentIndex;
-    const match = openFenceRegex.exec(rawText);
-
-    if (!match) {
-      // No more code fences, remainder is plain text
+  while ((match = markerRegex.exec(rawText)) !== null) {
+    if (match.index > lastIndex) {
       segments.push({
         type: 'text',
-        content: rawText.slice(currentIndex),
-      });
-      break;
-    }
-
-    const matchStart = match.index + (match[0].startsWith('\n') ? 1 : 0);
-    const fence = match[1];
-    const lang = match[2] || '';
-    const contentStart = match.index + match[0].length;
-
-    // Push any text preceding the opening fence
-    if (matchStart > currentIndex) {
-      segments.push({
-        type: 'text',
-        content: rawText.slice(currentIndex, matchStart),
+        content: rawText.slice(lastIndex, match.index),
       });
     }
 
-    // Look for matching closing fence at beginning of line
-    const closeFencePattern = new RegExp(`(?:^|\\n)${fence}(?=\\n|$)`, 'g');
-    closeFencePattern.lastIndex = contentStart;
-    const closeMatch = closeFencePattern.exec(rawText);
-
-    if (closeMatch) {
-      const codeEnd = closeMatch.index;
-      const closingFenceEnd = closeMatch.index + closeMatch[0].length;
-      const codeContent = rawText.slice(contentStart, codeEnd);
-
+    if (match[1] !== undefined) {
+      // Internal delimiter format \u001DPASTE:(regular|qNq)\u001E...\u001F
+      const category = match[1] as ChipCategory;
+      const content = trimBackticks(match[2]);
       segments.push({
-        type: 'code',
-        fence,
-        language: lang,
-        code: codeContent,
-        raw: rawText.slice(matchStart, closingFenceEnd),
+        type: 'chip',
+        category,
+        content,
       });
-
-      // Move currentIndex to after the closing fence
-      currentIndex = closingFenceEnd;
-    } else {
-      // Unclosed code block — treat remainder as code
-      const codeContent = rawText.slice(contentStart);
+    } else if (match[3] !== undefined) {
+      // «chip:(regular|qNq)»...«/chip»
+      const category = match[3] as ChipCategory;
+      const content = trimBackticks(match[4]);
       segments.push({
-        type: 'code',
-        fence,
-        language: lang,
-        code: codeContent,
-        raw: rawText.slice(matchStart),
+        type: 'chip',
+        category,
+        content,
       });
-      break;
+    } else if (match[5] !== undefined) {
+      // Legacy markdown code fence fallback
+      const fence = match[5];
+      const category: ChipCategory = fence.length >= 4 ? 'qNq' : 'regular';
+      const content = trimBackticks(match[6]);
+      segments.push({
+        type: 'chip',
+        category,
+        content,
+      });
     }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < rawText.length) {
+    segments.push({
+      type: 'text',
+      content: rawText.slice(lastIndex),
+    });
   }
 
   return segments;
 }
 
-interface CodeChipProps {
-  segment: CodeSegment;
+interface ClickableChipProps {
+  segment: ChipSegment;
   onCopyText?: (text: string) => void;
 }
 
-const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
+const ClickableChip: React.FC<ClickableChipProps> = ({ segment, onCopyText }) => {
   const [isCopied, setIsCopied] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cleanCode = segment.code;
-  // Trim preview to maximum 20 characters
-  const trimmedCode = cleanCode.length > 20 ? cleanCode.slice(0, 20) + '…' : cleanCode;
-  const isTrimmed = cleanCode.length > 20 || cleanCode.includes('\n');
+  const cleanContent = segment.content;
+  // Trim preview to maximum 24 characters
+  const trimmedPreview = cleanContent.length > 24 ? cleanContent.slice(0, 24) + '…' : cleanContent;
+  const isTrimmed = cleanContent.length > 24 || cleanContent.includes('\n');
+  const isQnq = segment.category === 'qNq';
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onCopyText) {
-      onCopyText(cleanCode);
+      onCopyText(cleanContent);
     } else if (window.inkwellApi?.copyToClipboard) {
-      window.inkwellApi.copyToClipboard(cleanCode);
+      window.inkwellApi.copyToClipboard(cleanContent);
     } else if (navigator?.clipboard) {
-      navigator.clipboard.writeText(cleanCode);
+      navigator.clipboard.writeText(cleanContent);
     }
 
     setIsCopied(true);
@@ -220,29 +212,41 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
 
   return (
     <span
-      className="relative inline-flex items-center align-middle my-0.5 mx-1 group"
+      className="relative inline-flex items-center align-middle my-0 mx-1 group"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Syntax Highlighted Clickable Chip (Trimmed Max 20 Chars) */}
+      {/* Clickable Chip */}
       <button
         type="button"
         onClick={handleCopy}
-        title="Click to copy full pasted snippet"
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] bg-ink-card/95 hover:bg-ink-hover border border-ink-accent/40 hover:border-ink-accent text-ink-text transition-all shadow-xs cursor-pointer select-none max-w-full"
+        title={`Click to copy ${isQnq ? 'qNq snippet' : 'pasted content'}`}
+        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] leading-none bg-ink-card/95 hover:bg-ink-hover border ${
+          isQnq
+            ? 'border-amber-500/40 hover:border-amber-400/80 bg-amber-950/10'
+            : 'border-ink-accent/40 hover:border-ink-accent'
+        } text-ink-text transition-all shadow-xs cursor-pointer select-none max-w-full`}
       >
-        <span className="text-ink-accent-light font-bold flex items-center gap-1 shrink-0">
-          <CodeIcon className="w-3.5 h-3.5 text-ink-accent-light" />
-          <span>{segment.fence}</span>
+        <span
+          className={`font-semibold flex items-center gap-1 shrink-0 ${
+            isQnq ? 'text-amber-400' : 'text-ink-accent-light'
+          }`}
+        >
+          {isQnq ? (
+            <CodeIcon className="w-3 h-3 text-amber-400" />
+          ) : (
+            <CopyIcon className="w-3 h-3 text-ink-accent-light" />
+          )}
+          <span className="text-[10px] tracking-wide font-medium">{isQnq ? 'qNq' : 'PASTED'}</span>
         </span>
 
         {/* Trimmed syntax-highlighted preview */}
-        {cleanCode.trim() ? (
+        {cleanContent.trim() ? (
           <span className="font-mono text-[11px] truncate text-ink-text max-w-[240px] inline-block">
-            {renderSyntaxHighlighted(trimmedCode)}
+            {renderSyntaxHighlighted(trimmedPreview)}
           </span>
         ) : (
-          <span className="text-ink-faint italic font-sans text-[10px]">empty snippet</span>
+          <span className="text-ink-faint italic font-sans text-[10px]">empty</span>
         )}
 
         {/* Copy / Copied Indicator */}
@@ -253,24 +257,32 @@ const CodeChip: React.FC<CodeChipProps> = ({ segment, onCopyText }) => {
               <span>Copied</span>
             </span>
           ) : (
-            <CopyIcon className="w-3 h-3 text-ink-muted group-hover:text-ink-accent-light transition-colors" />
+            <span className="text-ink-faint text-[9px] group-hover:text-ink-muted transition-colors">
+              copy
+            </span>
           )}
         </span>
       </button>
 
-      {/* Hover Popover showing FULL Syntax-Highlighted Snippet */}
-      {isHovered && cleanCode.trim().length > 0 && isTrimmed && (
-        <div className="absolute left-0 bottom-full mb-2 z-50 min-w-[200px] w-max max-w-[85vw] sm:max-w-[440px] bg-ink-sidebar/95 backdrop-blur-md rounded-lg border border-ink-border shadow-2xl p-2.5 text-left pointer-events-auto">
+      {/* Hover Popover showing FULL Content */}
+      {isHovered && cleanContent.trim().length > 0 && isTrimmed && (
+        <div className="absolute left-0 bottom-full mb-2 z-50 min-w-[220px] w-max max-w-[85vw] sm:max-w-[440px] bg-ink-sidebar/95 backdrop-blur-md rounded-lg border border-ink-border shadow-2xl p-2.5 text-left pointer-events-auto">
           <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-ink-border text-[10px] text-ink-muted select-none">
-            <span className="font-medium text-ink-accent-light flex items-center gap-1">
-              <CodeIcon className="w-3 h-3" />
-              <span>{segment.fence} Snippet ({cleanCode.length} chars)</span>
+            <span
+              className={`font-medium flex items-center gap-1 ${
+                isQnq ? 'text-amber-400' : 'text-ink-accent-light'
+              }`}
+            >
+              {isQnq ? <CodeIcon className="w-3 h-3" /> : <CopyIcon className="w-3 h-3" />}
+              <span>
+                {isQnq ? 'qNq Snippet' : 'Pasted Content'} ({cleanContent.length} chars)
+              </span>
             </span>
             <span className="text-ink-faint">Click chip to copy</span>
           </div>
 
           <pre className="font-mono text-[11px] leading-relaxed text-ink-text whitespace-pre-wrap break-words max-h-56 overflow-y-auto select-text p-2 bg-ink-bg/90 rounded border border-ink-border-subtle">
-            {renderSyntaxHighlighted(cleanCode)}
+            {renderSyntaxHighlighted(cleanContent)}
           </pre>
         </div>
       )}
@@ -290,8 +302,8 @@ export const RichContentText: React.FC<RichContentTextProps> = ({
   return (
     <span className={`inline leading-relaxed ${className}`}>
       {segments.map((seg, idx) => {
-        if (seg.type === 'code') {
-          return <CodeChip key={idx} segment={seg} onCopyText={onCopyText} />;
+        if (seg.type === 'chip') {
+          return <ClickableChip key={idx} segment={seg} onCopyText={onCopyText} />;
         }
         return (
           <span key={idx} className="whitespace-pre-wrap">
