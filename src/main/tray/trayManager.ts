@@ -34,6 +34,9 @@ export function updateTrayMenu(
   if (!tray) return;
 
   const running = isCaptureRunning();
+  // Accelerators on a Tray's context menu only function as local key-equivalents while that specific menu is open
+  // (macOS-only behavior in Electron — this project targets arm64/darwin exclusively per electron-builder.config.cjs, so this is safe),
+  // they are not global shortcuts and won't fire when the menu is closed.
   const contextMenu = Menu.buildFromTemplate([
     {
       label: running ? '● Capturing Keystrokes' : '○ Capture Paused',
@@ -42,6 +45,7 @@ export function updateTrayMenu(
     { type: 'separator' },
     {
       label: running ? 'Pause Capture' : 'Resume Capture',
+      accelerator: 'CommandOrControl+P',
       click: () => {
         if (running) {
           stopCapture();
@@ -53,6 +57,7 @@ export function updateTrayMenu(
     },
     {
       label: 'Open Inkwell Window',
+      accelerator: 'CommandOrControl+O',
       click: () => {
         if (onOpenWindow) {
           onOpenWindow();
@@ -69,6 +74,7 @@ export function updateTrayMenu(
     { type: 'separator' },
     {
       label: 'Show Logs in Finder',
+      accelerator: 'CommandOrControl+L',
       click: () => {
         shell.showItemInFolder(logger.getLogPath());
       },
@@ -76,6 +82,7 @@ export function updateTrayMenu(
     { type: 'separator' },
     {
       label: 'Quit Inkwell',
+      accelerator: 'CommandOrControl+Q',
       click: () => {
         requestQuit('user-tray-quit');
       },
