@@ -34,18 +34,25 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
 
   if (!text && !count) {
     return (
-      <div className="px-4 py-2 bg-ink-sidebar/60 border-b border-ink-border flex items-center justify-between text-xs text-ink-muted select-none">
-        <span>Awaiting keystrokes · Type in any application to begin</span>
+      <div className="px-4 py-2.5 bg-ink-sidebar/80 border-b border-ink-border-subtle flex items-center justify-between text-xs text-ink-muted select-none">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-ink-faint" />
+          <span className="font-mono text-[11px] text-ink-muted tracking-tight">
+            Awaiting input · Type in any active application
+          </span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-3 bg-ink-panel/70 border-b border-ink-border select-none max-h-[50vh] flex flex-col overflow-hidden">
+    <div className="p-3 bg-ink-panel/90 border-b border-ink-border select-none max-h-[50vh] flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-2 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-ink-muted">Active buffer</span>
-          <span className="px-2 py-0.5 rounded bg-ink-card text-ink-text text-xs font-medium flex items-center gap-1.5">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">
+            Live Desk
+          </span>
+          <span className="px-2 py-0.5 rounded bg-ink-card border border-ink-border-subtle text-ink-text text-xs font-medium flex items-center gap-1.5">
             {appIcon && (
               <img
                 src={appIcon}
@@ -56,25 +63,28 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
             <span>{app || 'Active App'}</span>
           </span>
         </div>
-        <div className="text-xs text-ink-muted">
+        <div className="font-mono text-[11px] text-ink-muted">
           <span>
             {count} {count === 1 ? 'keystroke' : 'keystrokes'}
           </span>
         </div>
       </div>
 
-      <div ref={scrollRef} className="font-mono text-xs leading-relaxed bg-ink-bg p-2.5 rounded-md border border-ink-border text-ink-text whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-h-[48px] shadow-inner select-text overflow-y-auto flex-1">
+      <div
+        ref={scrollRef}
+        className="font-mono text-xs leading-relaxed bg-ink-bg p-3 rounded border border-ink-border text-ink-text whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-h-[48px] select-text overflow-y-auto flex-1 shadow-inner focus-within:border-ink-border"
+      >
         {text ? (
           <>
             <RichContentText text={text} />
             <span
-              className="inline-block w-[1.5px] h-[13px] bg-ink-accent-light align-middle ml-0.5 animate-cursor-blink pointer-events-none rounded-full shadow-[0_0_4px_rgba(94,203,215,0.6)]"
+              className="inline-block w-[1.5px] h-[13px] bg-ink-accent-light align-middle ml-0.5 animate-cursor-blink pointer-events-none rounded-full"
               aria-hidden="true"
             />
           </>
         ) : (
           <span className="text-ink-faint font-sans text-xs flex items-center gap-1">
-            <span>Inking in progress...</span>
+            <span>Inking keystrokes...</span>
             <span
               className="inline-block w-[1.5px] h-[12px] bg-ink-accent/60 align-middle ml-0.5 animate-cursor-blink pointer-events-none rounded-full"
               aria-hidden="true"

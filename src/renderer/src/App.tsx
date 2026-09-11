@@ -409,7 +409,7 @@ export const App: React.FC = () => {
         {/* Overlay backdrop when settings open on compact screens */}
         {isSettingsOpen && (
           <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-xs z-20 md:hidden"
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-30 transition-opacity"
             onClick={() => setIsSettingsOpen(false)}
           />
         )}

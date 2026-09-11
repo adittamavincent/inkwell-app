@@ -30,14 +30,14 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
   if (!isAccAuthorized) {
     const isDenied = accessibility === 'denied' || accessibility === 'restricted';
     return (
-      <div className="bg-amber-950/40 border-b border-amber-800/40 px-4 py-2 flex items-center justify-between text-xs text-amber-200 select-none">
-        <div className="flex items-center gap-2">
+      <div className="bg-amber-950/20 border-b border-amber-800/30 px-4 py-2 flex items-center justify-between text-xs text-amber-200/90 select-none">
+        <div className="flex items-center gap-2 font-sans">
           <ShieldAlertIcon className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="leading-tight">
-            <strong className="font-semibold text-amber-100">Accessibility Required:</strong> Inkwell cannot detect active applications until granted in System Settings.
+          <span className="leading-tight text-[11px]">
+            <strong className="font-semibold text-amber-100">Accessibility Clearance Required:</strong> Active app detection is paused until granted in System Settings.
           </span>
         </div>
-        <div className="flex items-center gap-1.5 ml-4 shrink-0">
+        <div className="flex items-center gap-1 ml-4 shrink-0">
           {!isDenied && (
             <IconButton
               icon={KeyRoundIcon}
@@ -62,14 +62,14 @@ export const PermissionBanner: React.FC<PermissionBannerProps> = ({
   // Case 2: Input Monitoring is missing / denied
   const isInputDenied = inputMonitoring === 'denied' || inputMonitoring === 'restricted';
   return (
-    <div className="bg-amber-950/40 border-b border-amber-800/40 px-4 py-2 flex items-center justify-between text-xs text-amber-200 select-none">
-      <div className="flex items-center gap-2">
+    <div className="bg-amber-950/20 border-b border-amber-800/30 px-4 py-2 flex items-center justify-between text-xs text-amber-200/90 select-none">
+      <div className="flex items-center gap-2 font-sans">
         <AlertTriangleIcon className="w-4 h-4 text-amber-400 shrink-0" />
-        <span className="leading-tight">
-          <strong className="font-semibold text-amber-100">Input Monitoring Required:</strong> Accessibility is active, but Input Monitoring must be authorized to record strokes.
+        <span className="leading-tight text-[11px]">
+          <strong className="font-semibold text-amber-100">Input Monitoring Clearance Required:</strong> Keystroke capture requires system permission.
         </span>
       </div>
-      <div className="flex items-center gap-1.5 ml-4 shrink-0">
+      <div className="flex items-center gap-1 ml-4 shrink-0">
         {!isInputDenied && (
           <IconButton
             icon={KeyRoundIcon}

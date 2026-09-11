@@ -5,12 +5,15 @@
 @layer base {
   body {
     @apply bg-ink-bg text-ink-text selection:bg-ink-accent/30 selection:text-ink-accent-light;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Instant, crisp focus states */
+  /* Crisp utilitarian focus states */
   *:focus-visible {
-    @apply outline-none ring-1 ring-ink-accent ring-offset-0;
+    @apply outline-none ring-1 ring-ink-accent-light/50 ring-offset-0;
   }
 }
 
@@ -22,10 +25,10 @@
   -webkit-app-region: no-drag;
 }
 
-/* Fine-ruled archival scrollbar */
+/* Minimalist fine-line scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -33,12 +36,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e3340;
+  background: #1c2630;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2b4556;
+  background: #2b3947;
 }
 
 @keyframes cursor-blink {
