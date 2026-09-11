@@ -2,24 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from '../logger';
+import { getAppDataDir } from '../storage/paths';
+
+export { getAppDataDir };
 
 const KEY_FILE = 'db.key';
 let cachedKey: Buffer | null = null;
 let encryptionFailedWarned = false;
-
-export function getAppDataDir(): string {
-  // Use com.inkwell.app directory on macOS to maintain compatibility with the Rust version
-  const home = process.env.HOME || '.';
-  const dir = path.join(home, 'Library', 'Application Support', 'com.inkwell.app');
-  if (!fs.existsSync(dir)) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch {
-      return path.join(home, '.inkwell');
-    }
-  }
-  return dir;
-}
 
 function loadOrCreateKey(): Buffer | null {
   if (cachedKey) return cachedKey;

@@ -18,51 +18,41 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   onSaveConfig,
   onForceSync,
 }) => {
-  const [form, setForm] = useState<CogdexSyncConfig>({ ...config });
-  const [excludedAppsText, setExcludedAppsText] = useState(
-    config.excludedApps.join(', ')
-  );
+  const [form, setForm] = useState<CogdexSyncConfig>(config);
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<SyncResponse | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setForm({ ...config });
-    setExcludedAppsText(config.excludedApps.join(', '));
+    setForm(config);
   }, [config]);
 
-  const handleSave = async () => {
+  if (!isOpen) return null;
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
     setIsSaving(true);
-    setSaveSuccess(false);
-
-    const apps = excludedAppsText
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    await onSaveConfig({
-      ...form,
-      excludedApps: apps,
-      idleTimeoutSecs: Number(form.idleTimeoutSecs) || 60,
-    });
-
-    setIsSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2000);
+    setSaveMessage(null);
+    try {
+      await onSaveConfig(form);
+      setSaveMessage('Saved');
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch {
+      setSaveMessage('Error saving settings');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleSync = async () => {
+  const handleSyncNow = async () => {
     setIsSyncing(true);
-    setSyncStatus(null);
+    setSyncMessage(null);
     try {
       const res = await onForceSync();
-      setSyncStatus(res);
-    } catch (err: any) {
-      setSyncStatus({
-        success: false,
-        message: err?.message || 'Sync request failed',
-      });
+      setSyncMessage(res.message);
+    } catch {
+      setSyncMessage('Sync failed');
     } finally {
       setIsSyncing(false);
     }
@@ -70,62 +60,66 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   return (
     <aside
-      className={`fixed top-0 right-0 bottom-0 w-96 bg-ink-panel border-l border-ink-border shadow-elevated flex flex-col z-40 transform transition-transform duration-200 ease-out select-none ${
-        isOpen ? 'translate-x-0' : 'translate-x-full'
-      }`}
+      className="fixed inset-y-0 right-0 z-40 w-80 bg-ink-sidebar/95 backdrop-blur-md border-l border-ink-border shadow-overlay flex flex-col animate-slide-in-right select-none font-sans"
+      aria-label="Settings panel"
     >
-      {/* Header */}
-      <div className="h-12 px-4 border-b border-ink-border flex items-center justify-between bg-ink-sidebar/95 backdrop-blur-md">
+      {/* Drawer Header */}
+      <div className="h-12 border-b border-ink-border flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="font-serif text-sm font-semibold text-ink-text tracking-wide">
-            Vault Sync & Engine
-          </span>
+          <h2 className="font-serif text-sm font-semibold text-ink-warm">
+            Obsidian Sync Settings
+          </h2>
         </div>
-        <IconButton icon={CloseIcon} title="Close settings" onClick={onClose} size="sm" variant="ghost" />
+        <IconButton
+          icon={CloseIcon}
+          title="Close drawer"
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+        />
       </div>
 
-      {/* Form Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs font-sans">
-        {/* Dev Mode TCC Identity Notice */}
-        {import.meta.env.DEV && (
-          <div className="p-3 rounded bg-ink-card border border-ink-accent/30 text-ink-accent-light space-y-1">
-            <div className="text-xs font-mono uppercase tracking-wider font-semibold text-ink-accent-light flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-ink-accent-light" />
-              Dev Mode Permission Identity
-            </div>
-            <p className="text-[11px] leading-relaxed text-ink-muted">
-              In dev mode, macOS assigns system permissions to the <strong className="text-ink-text font-semibold">'Electron'</strong> binary bundle.
-            </p>
+      {/* Settings Form */}
+      <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+        {/* Sync Enable Toggle */}
+        <div className="flex items-center justify-between p-2.5 rounded-lg bg-ink-panel/60 border border-ink-border-subtle">
+          <div>
+            <span className="font-medium text-ink-text block">
+              Enable Obsidian Sync
+            </span>
+            <span className="text-[11px] text-ink-muted">
+              Auto-sync sessions to vault
+            </span>
           </div>
-        )}
-
-        {/* Master Switch Card */}
-        <div className="p-3.5 bg-ink-card rounded border border-ink-border flex items-center justify-between">
-          <div className="pr-3">
-            <div className="font-medium text-ink-text text-xs">Enable Vault Sync</div>
-            <div className="text-ink-muted text-[11px] leading-tight mt-0.5">
-              Append completed keylog sessions to your Obsidian daily note
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={form.enabled}
-            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            className="w-4 h-4 rounded border-ink-border bg-ink-bg text-ink-accent focus:ring-1 focus:ring-ink-accent-light cursor-pointer accent-ink-accent"
-          />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={form.enabled}
+            onClick={() => setForm({ ...form, enabled: !form.enabled })}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              form.enabled ? 'bg-ink-accent' : 'bg-ink-border'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                form.enabled ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
 
         {/* Vault Path */}
         <div className="space-y-1.5">
-          <label className="block font-medium text-ink-text text-xs">
-            Obsidian Vault Path (Absolute)
+          <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
+            <span>Obsidian Vault Path</span>
+            <span className="text-ink-muted font-mono text-[11px]">(Absolute path)</span>
           </label>
           <input
             type="text"
-            placeholder="/Users/username/Documents/ObsidianVault"
+            placeholder="/Users/username/Obsidian/MyVault"
             value={form.vaultPath}
             onChange={(e) => setForm({ ...form, vaultPath: e.target.value })}
-            className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
+            className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
           />
         </div>
 
@@ -133,112 +127,104 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
         <div className="space-y-1.5">
           <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
             <span>Daily Folder Root</span>
-            <span className="text-ink-faint font-mono text-[11px]">(default: Daily)</span>
+            <span className="text-ink-muted font-mono text-[11px]">(default: Daily)</span>
           </label>
           <input
             type="text"
             placeholder="Daily"
             value={form.dailyFolderRoot}
             onChange={(e) => setForm({ ...form, dailyFolderRoot: e.target.value })}
-            className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
+            className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
           />
         </div>
 
-        {/* Day Pattern & Keylog Suffix */}
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="space-y-1.5">
-            <label className="block font-medium text-ink-text text-xs">Day Pattern</label>
-            <input
-              type="text"
-              placeholder="%Y-%m-%d"
-              value={form.dayPattern}
-              onChange={(e) => setForm({ ...form, dayPattern: e.target.value })}
-              className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="block font-medium text-ink-text text-xs">Keylog Suffix</label>
-            <input
-              type="text"
-              placeholder=" - keylog"
-              value={form.keylogSuffix}
-              onChange={(e) => setForm({ ...form, keylogSuffix: e.target.value })}
-              className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
-            />
-          </div>
+        {/* Day Pattern */}
+        <div className="space-y-1.5">
+          <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
+            <span>Day Folder Pattern</span>
+            <span className="text-ink-muted font-mono text-[11px]">(moment format)</span>
+          </label>
+          <input
+            type="text"
+            placeholder="YYYY/MM-MMM/YYYY-MM-DD"
+            value={form.dayPattern}
+            onChange={(e) => setForm({ ...form, dayPattern: e.target.value })}
+            className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
+          />
+        </div>
+
+        {/* Keylog Note Suffix */}
+        <div className="space-y-1.5">
+          <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
+            <span>Keylog Note Suffix</span>
+            <span className="text-ink-muted font-mono text-[11px]">(e.g. keylog)</span>
+          </label>
+          <input
+            type="text"
+            placeholder="keylog"
+            value={form.keylogSuffix}
+            onChange={(e) => setForm({ ...form, keylogSuffix: e.target.value })}
+            className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
+          />
         </div>
 
         {/* Idle Timeout */}
         <div className="space-y-1.5">
-          <label className="block font-medium text-ink-text text-xs">
-            Idle Timeout Gap (seconds)
+          <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
+            <span>Idle Timeout (seconds)</span>
+            <span className="text-ink-muted font-mono text-[11px]">(Default 120s)</span>
           </label>
           <input
             type="number"
-            min="5"
+            min="10"
             max="3600"
             value={form.idleTimeoutSecs}
-            onChange={(e) =>
-              setForm({ ...form, idleTimeoutSecs: parseInt(e.target.value, 10) || 60 })
-            }
-            className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
+            onChange={(e) => setForm({ ...form, idleTimeoutSecs: Number(e.target.value) })}
+            className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
           />
         </div>
 
-        {/* Excluded Apps */}
-        <div className="space-y-1.5">
-          <label className="block font-medium text-ink-text text-xs">
-            Excluded Applications
-          </label>
-          <textarea
-            rows={3}
-            value={excludedAppsText}
-            onChange={(e) => setExcludedAppsText(e.target.value)}
-            placeholder="1password, bitwarden, inkwell, ..."
-            className="w-full bg-ink-bg border border-ink-border rounded px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors resize-none"
-          />
-          <span className="text-[11px] text-ink-faint block">
-            Comma-separated app names to ignore during keystroke logging.
-          </span>
-        </div>
-
-        {/* Sync Status Banner */}
-        {syncStatus && (
-          <div
-            className={`p-2.5 rounded border text-xs leading-relaxed break-words font-mono ${
-              syncStatus.success
-                ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-300'
-                : 'bg-rose-950/20 border-rose-800/40 text-rose-300'
-            }`}
-          >
-            {syncStatus.message}
-          </div>
-        )}
-      </div>
-
-      {/* Footer Controls */}
-      <div className="p-3.5 border-t border-ink-border bg-ink-sidebar/95">
-        <div className="grid grid-cols-2 gap-2">
+        {/* Save button & status */}
+        <div className="pt-2 flex items-center justify-between">
           <button
-            type="button"
-            onClick={handleSave}
+            type="submit"
             disabled={isSaving}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded bg-ink-card hover:bg-ink-hover text-ink-text border border-ink-border font-medium transition-colors text-xs select-none disabled:opacity-40 cursor-pointer shadow-subtle active:scale-[0.98]"
+            className="px-3.5 py-1.5 bg-ink-accent hover:bg-ink-accent-hover text-white rounded-md font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
           >
-            {saveSuccess ? <CheckIcon className="w-3.5 h-3.5 text-emerald-400" /> : <SaveIcon className="w-3.5 h-3.5 text-ink-muted" />}
-            <span>{saveSuccess ? 'Saved' : 'Save Config'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={isSyncing}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded bg-ink-accent hover:bg-ink-accent-hover text-white border border-ink-accent-light/30 font-medium transition-colors text-xs select-none disabled:opacity-40 cursor-pointer shadow-subtle active:scale-[0.98]"
-          >
-            <RefreshIcon className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing...' : 'Force Sync'}</span>
+            {saveMessage ? (
+              <>
+                <CheckIcon className="w-3.5 h-3.5 text-ink-success" />
+                <span>{saveMessage}</span>
+              </>
+            ) : (
+              <>
+                <SaveIcon className="w-3.5 h-3.5" />
+                <span>Save Config</span>
+              </>
+            )}
           </button>
         </div>
+      </form>
+
+      {/* Manual Force Sync Section */}
+      <div className="p-4 border-t border-ink-border bg-ink-panel/40 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-ink-text">Manual Sync</span>
+          {syncMessage && (
+            <span className="text-[11px] text-ink-muted truncate max-w-[150px]">
+              {syncMessage}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncNow}
+          disabled={isSyncing || !form.enabled}
+          className="w-full px-3 py-1.5 bg-ink-card hover:bg-ink-hover border border-ink-border text-ink-text rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <RefreshIcon className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>{isSyncing ? 'Syncing...' : 'Force Sync'}</span>
+        </button>
       </div>
     </aside>
   );

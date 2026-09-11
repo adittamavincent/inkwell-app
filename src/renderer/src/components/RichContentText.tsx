@@ -52,43 +52,43 @@ function renderSyntaxHighlighted(code: string): React.ReactNode {
 
     if (comment) {
       elements.push(
-        <span key={`comment-${matchIndex}`} className="text-ink-muted/80 italic">
+        <span key={`comment-${matchIndex}`} className="text-ink-muted/70 italic font-mono">
           {comment}
         </span>
       );
     } else if (str) {
       elements.push(
-        <span key={`str-${matchIndex}`} className="text-emerald-300">
+        <span key={`str-${matchIndex}`} className="text-emerald-400 font-mono">
           {str}
         </span>
       );
     } else if (keyword) {
       elements.push(
-        <span key={`kw-${matchIndex}`} className="text-purple-300 font-semibold">
+        <span key={`kw-${matchIndex}`} className="text-sky-300 font-semibold font-mono">
           {keyword}
         </span>
       );
     } else if (booleanNull) {
       elements.push(
-        <span key={`bool-${matchIndex}`} className="text-amber-300 font-medium">
+        <span key={`bool-${matchIndex}`} className="text-amber-300 font-medium font-mono">
           {booleanNull}
         </span>
       );
     } else if (num) {
       elements.push(
-        <span key={`num-${matchIndex}`} className="text-orange-300">
+        <span key={`num-${matchIndex}`} className="text-amber-200 font-mono">
           {num}
         </span>
       );
     } else if (fnName) {
       elements.push(
-        <span key={`fn-${matchIndex}`} className="text-cyan-300">
+        <span key={`fn-${matchIndex}`} className="text-cyan-300 font-mono">
           {fnName}
         </span>
       );
     } else if (punct) {
       elements.push(
-        <span key={`punct-${matchIndex}`} className="text-ink-faint">
+        <span key={`punct-${matchIndex}`} className="text-ink-faint font-mono">
           {punct}
         </span>
       );
@@ -326,7 +326,7 @@ const ClickableChip: React.FC<ClickableChipProps> = ({ segment, onCopyText }) =>
         {/* Copy / Copied Indicator */}
         <span className="shrink-0 ml-1 flex items-center">
           {isCopied ? (
-            <span className="inline-flex items-center gap-0.5 text-emerald-400 text-[10px] font-sans font-medium">
+            <span className="inline-flex items-center gap-0.5 text-ink-success text-[10px] font-sans font-medium">
               <CheckIcon className="w-3 h-3" />
               <span>Copied</span>
             </span>
@@ -358,12 +358,12 @@ const ClickableChip: React.FC<ClickableChipProps> = ({ segment, onCopyText }) =>
               setIsHovered(true);
             }}
             onMouseLeave={handleMouseLeave}
-            className="w-max bg-ink-panel/95 backdrop-blur-md rounded-md border border-ink-border shadow-elevated p-2.5 text-left pointer-events-auto animate-in fade-in zoom-in-95 duration-100 font-sans select-none"
+            className="w-max bg-ink-panel/95 backdrop-blur-md rounded-md border border-ink-border shadow-elevated p-2.5 text-left pointer-events-auto animate-scale-in font-sans select-none"
           >
             <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-ink-border-subtle text-[10px] text-ink-muted select-none">
               <span
                 className={`font-medium flex items-center gap-1 ${
-                  isQnq ? 'text-amber-400' : 'text-ink-accent-light'
+                  isQnq ? 'text-ink-warning' : 'text-ink-accent-light'
                 }`}
               >
                 {isQnq ? <CodeIcon className="w-3 h-3" /> : <CopyIcon className="w-3 h-3" />}

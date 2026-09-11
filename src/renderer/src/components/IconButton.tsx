@@ -21,50 +21,61 @@ export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
   active?: boolean;
 }
 
-const variantStyles: Record<IconButtonVariant, string> = {
-  default:
-    'text-ink-muted hover:text-ink-text hover:bg-ink-hover/80 active:bg-ink-panel border border-transparent',
-  ghost:
-    'text-ink-muted hover:text-ink-text hover:bg-ink-hover/50 active:bg-ink-panel/60 border border-transparent',
-  bordered:
-    'text-ink-muted hover:text-ink-text bg-ink-card/50 hover:bg-ink-hover border border-ink-border active:bg-ink-panel',
-  primary:
-    'text-ink-accent-light hover:text-white bg-ink-accent/15 hover:bg-ink-accent/30 border border-ink-accent/30 active:bg-ink-accent/40',
-  active:
-    'text-white bg-ink-accent hover:bg-ink-accent-hover border border-ink-accent-light/40 shadow-subtle',
-  danger:
-    'text-ink-muted hover:text-ink-danger hover:bg-ink-danger-muted/30 border border-transparent hover:border-ink-danger/30 active:bg-ink-danger-muted/50',
-  success:
-    'text-emerald-400 hover:text-emerald-300 bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-800/30 active:bg-emerald-900/40',
-  warning:
-    'text-amber-400 hover:text-amber-300 bg-amber-950/20 hover:bg-amber-950/40 border border-amber-800/30 active:bg-amber-900/40',
-};
-
-const sizeStyles: Record<IconButtonSize, { button: string; icon: string }> = {
-  sm: { button: 'p-1 rounded text-xs', icon: 'w-3.5 h-3.5' },
-  md: { button: 'p-1.5 rounded-md text-xs', icon: 'w-4 h-4' },
-  lg: { button: 'p-2 rounded-lg text-sm', icon: 'w-5 h-5' },
-};
-
 export const IconButton: React.FC<IconButtonProps> = ({
-  icon: IconComponent,
+  icon,
   title,
   variant = 'default',
   size = 'md',
   active = false,
   className = '',
-  disabled,
+  disabled = false,
   ...props
 }) => {
+  const sizeConfig = {
+    sm: {
+      button: 'p-1.5 rounded-md text-xs',
+      icon: 'w-3.5 h-3.5',
+    },
+    md: {
+      button: 'p-2 rounded-md text-sm',
+      icon: 'w-4 h-4',
+    },
+    lg: {
+      button: 'p-2.5 rounded-lg text-base',
+      icon: 'w-5 h-5',
+    },
+  }[size];
+
+  const variantStyles: Record<IconButtonVariant, string> = {
+    default:
+      'bg-ink-card/80 hover:bg-ink-hover border border-ink-border/80 text-ink-muted hover:text-ink-text active:scale-[0.97]',
+    primary:
+      'bg-ink-accent hover:bg-ink-accent-hover text-white shadow-subtle active:scale-[0.97]',
+    danger:
+      'bg-ink-card/60 hover:bg-ink-danger-muted border border-ink-border/60 hover:border-ink-danger-border text-ink-muted hover:text-ink-danger active:scale-[0.97]',
+    ghost:
+      'bg-transparent hover:bg-ink-hover text-ink-muted hover:text-ink-text active:scale-[0.97]',
+    active:
+      'bg-ink-accent-muted border border-ink-accent/50 text-ink-accent-light active:scale-[0.97]',
+    success:
+      'bg-ink-success-muted border border-ink-success-border text-ink-success active:scale-[0.97]',
+    warning:
+      'bg-ink-warning-muted border border-ink-warning-border text-ink-warning active:scale-[0.97]',
+    bordered:
+      'bg-ink-panel border border-ink-border text-ink-text hover:border-ink-accent/40 active:scale-[0.97]',
+  };
+
   const currentVariant = active ? 'active' : variant;
-  const sizeConfig = sizeStyles[size];
 
   const renderIcon = () => {
-    if (React.isValidElement(IconComponent)) {
-      return IconComponent;
+    if (React.isValidElement(icon)) {
+      return icon;
     }
-    const Icon = IconComponent as React.ComponentType<IconProps>;
-    return <Icon className={sizeConfig.icon} />;
+    if (typeof icon === 'function' || typeof icon === 'object') {
+      const IconComp = icon as React.ComponentType<IconProps>;
+      return <IconComp className={sizeConfig.icon} />;
+    }
+    return null;
   };
 
   return (
@@ -73,7 +84,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
       title={title}
       aria-label={title}
       disabled={disabled}
-      className={`inline-flex items-center justify-center transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink-accent-light/60 ${
+      className={`interactive-tap inline-flex items-center justify-center font-medium transition-colors focus-visible:ring-1 focus-visible:ring-ink-accent-light/60 ${
         disabled ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
       } ${sizeConfig.button} ${variantStyles[currentVariant]} ${className}`}
       {...props}

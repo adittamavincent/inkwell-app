@@ -20,16 +20,16 @@ interface ContextMenuState {
 
 export const SessionHistory: React.FC<SessionHistoryProps> = ({
   sessions,
-  appIcons,
+  appIcons = {},
   onCopyText,
   onDeleteSession,
 }) => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
-  const handleCopy = (text: string, idx: number) => {
+  const handleCopy = (text: string, index: number) => {
     onCopyText(text);
-    setCopiedIndex(idx);
+    setCopiedIndex(index);
     setTimeout(() => setCopiedIndex(null), 1500);
   };
 
@@ -43,158 +43,139 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     });
   };
 
+  // Close context menu on outside click or escape
   useEffect(() => {
     if (!contextMenu) return;
-    const handleClose = () => setContextMenu(null);
+    const handleClick = () => setContextMenu(null);
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setContextMenu(null);
     };
-
-    window.addEventListener('click', handleClose);
+    window.addEventListener('click', handleClick);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      window.removeEventListener('click', handleClose);
+      window.removeEventListener('click', handleClick);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [contextMenu]);
 
-  const formatTime = (timeVal: string | Date) => {
-    try {
-      const d = typeof timeVal === 'string' ? new Date(timeVal) : timeVal;
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch {
-      return String(timeVal);
-    }
-  };
-
   if (sessions.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-ink-muted select-none w-full">
-        <div className="w-10 h-10 rounded-full bg-ink-card border border-ink-border flex items-center justify-center mb-3">
-          <ClockIcon className="w-5 h-5 text-ink-faint" />
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center border border-dashed border-ink-border/60 rounded-xl bg-ink-panel/20 select-none">
+        <div className="w-10 h-10 rounded-full bg-ink-panel flex items-center justify-center text-ink-faint mb-3 border border-ink-border/60">
+          <ClockIcon className="w-5 h-5" />
         </div>
-        <h3 className="font-serif text-base font-medium text-ink-text mb-1 tracking-wide">
+        <h3 className="text-sm font-serif font-semibold text-ink-warm mb-1">
           Manuscript Archive Empty
         </h3>
-        <p className="text-xs max-w-xs text-ink-muted leading-relaxed">
-          Completed sessions across your system will be preserved and indexed here.
+        <p className="text-xs text-ink-muted max-w-[280px] leading-relaxed">
+          Keystrokes are recorded per application focus session and appended here when idle or switching apps.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-ink-border-subtle select-text w-full min-w-0 relative">
+    <div className="flex-1 overflow-y-auto space-y-3 pr-1 relative">
+      <div className="flex items-center justify-between px-1 select-none">
+        <span className="text-[11px] font-mono text-ink-faint uppercase tracking-wider font-medium">
+          Archived Sessions ({sessions.length})
+        </span>
+        <span className="text-[11px] text-ink-faint">
+          Right-click entry for options
+        </span>
+      </div>
+
       {sessions.map((session, index) => {
-        const icon = (appIcons && session.app && appIcons[session.app]) || null;
-        const isItemCopied = copiedIndex === index;
-        const isMenuOpenForThis = contextMenu?.index === index;
+        const timeStr = typeof session.start === 'string'
+          ? session.start
+          : new Date(session.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const icon = appIcons[session.app];
 
         return (
           <div
             key={index}
             onContextMenu={(e) => handleContextMenu(e, session, index)}
-            className={`group flex items-start justify-between gap-3 px-4 py-3 transition-colors w-full min-w-0 ${
-              isMenuOpenForThis ? 'bg-ink-panel' : 'hover:bg-ink-panel/60'
-            }`}
+            className="group relative bg-ink-panel border border-ink-border/80 hover:border-ink-accent/40 rounded-lg p-3 transition-all shadow-subtle flex flex-col gap-2"
           >
-            <div className="flex items-start gap-4 min-w-0 flex-1">
-              {/* Metadata gutter: Timestamp and App vertically stacked */}
-              <div className="shrink-0 flex flex-col items-start gap-1 select-none w-28 sm:w-32 pt-0.5">
-                <span className="font-mono text-[10px] text-ink-faint tabular-nums tracking-tight">
-                  {formatTime(session.start)}
+            {/* Header / Meta */}
+            <div className="flex items-center justify-between text-xs border-b border-ink-border-subtle pb-2">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-ink-muted text-[11px]">
+                  {timeStr}
                 </span>
-                <span className="font-sans text-xs text-ink-muted bg-ink-card/80 border border-ink-border-subtle px-1.5 py-0.5 rounded inline-flex items-center gap-1.5 max-w-full">
-                  {icon && (
+                <span className="font-sans text-xs text-ink-muted bg-ink-card border border-ink-border-subtle px-1.5 py-0.5 rounded-md inline-flex items-center gap-1.5 max-w-full">
+                  {icon ? (
                     <img
                       src={icon}
                       alt=""
-                      className="w-3.5 h-3.5 rounded-xs shrink-0 object-contain"
+                      className="w-3.5 h-3.5 rounded-sm shrink-0 object-contain"
                     />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-ink-faint shrink-0" />
                   )}
-                  <span className="truncate font-medium text-ink-text/90">{session.app || 'Unknown'}</span>
+                  <span className="font-medium text-ink-text truncate max-w-[140px] sm:max-w-[200px]">
+                    {session.app}
+                  </span>
                 </span>
               </div>
 
-              {/* Raw Keystroke text: min-w-0 and [overflow-wrap:anywhere] */}
-              <div className="font-mono text-xs text-ink-text leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] flex-1 min-w-0 pt-0.5">
-                <RichContentText text={session.text} onCopyText={onCopyText} />
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                <IconButton
+                  icon={copiedIndex === index ? CheckIcon : CopyIcon}
+                  title="Copy session text"
+                  variant={copiedIndex === index ? 'success' : 'ghost'}
+                  size="sm"
+                  onClick={() => handleCopy(session.text, index)}
+                />
+                {onDeleteSession && (
+                  <IconButton
+                    icon={TrashIcon}
+                    title="Delete session entry"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => onDeleteSession(session, index)}
+                  />
+                )}
               </div>
             </div>
 
-            {/* Hover Actions: Copy and Delete */}
-            <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0 select-none flex items-center gap-0.5">
-              <IconButton
-                icon={isItemCopied ? CheckIcon : CopyIcon}
-                title={isItemCopied ? 'Copied' : 'Copy session text'}
-                variant={isItemCopied ? 'success' : 'ghost'}
-                size="sm"
-                onClick={() => handleCopy(session.text, index)}
-              />
-              {onDeleteSession && (
-                <IconButton
-                  icon={TrashIcon}
-                  title="Delete session entry"
-                  variant="ghost"
-                  size="sm"
-                  className="hover:text-ink-danger hover:bg-ink-danger-muted/30"
-                  onClick={() => onDeleteSession(session, index)}
-                />
-              )}
+            {/* Session Text Content */}
+            <div className="font-mono text-xs text-ink-text/90 leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text pt-0.5">
+              <RichContentText text={session.text} onCopyText={onCopyText} />
             </div>
           </div>
         );
       })}
 
-      {/* Right-Click Context Menu */}
+      {/* Context Menu Portal / Popup */}
       {contextMenu && (
         <div
-          style={{
-            top: Math.min(contextMenu.y, typeof window !== 'undefined' ? window.innerHeight - 140 : contextMenu.y),
-            left: Math.min(contextMenu.x, typeof window !== 'undefined' ? window.innerWidth - 210 : contextMenu.x),
-          }}
-          className="fixed z-50 min-w-[190px] bg-ink-panel/95 backdrop-blur-md rounded-md border border-ink-border shadow-elevated py-1 text-xs text-ink-text select-none animate-in fade-in zoom-in-95 duration-100 font-sans"
-          onClick={(e) => e.stopPropagation()}
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          className="fixed z-50 min-w-[190px] bg-ink-panel/95 backdrop-blur-md rounded-lg border border-ink-border shadow-elevated py-1 text-xs text-ink-text select-none animate-scale-in font-sans"
         >
-          <div className="px-3 py-1.5 text-[10px] font-mono text-ink-faint border-b border-ink-border-subtle flex items-center justify-between mb-1">
-            <span className="font-sans font-medium text-ink-muted truncate max-w-[100px]">{contextMenu.session.app || 'Session'}</span>
-            <span>{formatTime(contextMenu.session.start)}</span>
-          </div>
-
           <button
             type="button"
-            className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-ink-hover hover:text-ink-text transition-colors cursor-pointer text-ink-muted"
             onClick={() => {
               handleCopy(contextMenu.session.text, contextMenu.index);
               setContextMenu(null);
             }}
+            className="w-full px-3 py-1.5 text-left hover:bg-ink-hover flex items-center gap-2 text-ink-text transition-colors cursor-pointer"
           >
-            <CopyIcon className="w-3.5 h-3.5 text-ink-accent-light" />
+            <CopyIcon className="w-3.5 h-3.5 text-ink-muted" />
             <span>Copy Session Text</span>
-          </button>
-
-          <button
-            type="button"
-            className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-ink-hover hover:text-ink-text transition-colors cursor-pointer text-ink-muted"
-            onClick={() => {
-              onCopyText(formatTime(contextMenu.session.start));
-              setContextMenu(null);
-            }}
-          >
-            <ClockIcon className="w-3.5 h-3.5 text-ink-muted" />
-            <span>Copy Timestamp</span>
           </button>
 
           {onDeleteSession && (
             <>
-              <div className="my-1 border-t border-ink-border-subtle" />
+              <div className="h-[1px] bg-ink-border my-1" />
               <button
                 type="button"
-                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-ink-danger-muted/40 text-ink-danger transition-colors cursor-pointer"
                 onClick={() => {
                   onDeleteSession(contextMenu.session, contextMenu.index);
                   setContextMenu(null);
                 }}
+                className="w-full px-3 py-1.5 text-left hover:bg-ink-danger-muted text-ink-danger hover:text-ink-danger-hover flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <TrashIcon className="w-3.5 h-3.5" />
                 <span className="font-medium">Delete Entry</span>
