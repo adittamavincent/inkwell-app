@@ -56,15 +56,11 @@ export function getAppDataDir(): string {
   let selectedDir: string;
 
   if (!isProd) {
-    // Development storage: local to repo in .inkwell-dev
-    selectedDir = path.join(process.cwd(), '.inkwell-dev');
+    // Development storage: stored in user's home directory (~/.inkwell-dev)
+    // to avoid keeping open SQLite file handles on external volumes (e.g. /Volumes/Meaw)
+    selectedDir = path.join(home, '.inkwell-dev');
     if (!fs.existsSync(selectedDir)) {
-      try {
-        fs.mkdirSync(selectedDir, { recursive: true });
-      } catch {
-        selectedDir = path.join(home, '.inkwell-dev');
-        fs.mkdirSync(selectedDir, { recursive: true });
-      }
+      fs.mkdirSync(selectedDir, { recursive: true });
     }
     logger.info('storage', `Using DEV storage directory: ${selectedDir}`);
   } else {

@@ -170,14 +170,28 @@ function icnsToDataUrl(icnsPath: string): Promise<string | null> {
 function findInkwellIconPath(): string | null {
   try {
     const appRoot = app.getAppPath();
-    const candidates = [
-      path.join(appRoot, 'icons/icon.icns'),
-      path.join(appRoot, '../icons/icon.icns'),
-      path.join(appRoot, '../../icons/icon.icns'),
-      path.join(process.cwd(), 'icons/icon.icns'),
-    ];
+    const candidates: string[] = [];
+    if (appRoot) {
+      candidates.push(
+        path.join(appRoot, 'icons/icon.icns'),
+        path.join(appRoot, '../icons/icon.icns'),
+        path.join(appRoot, '../../icons/icon.icns')
+      );
+    }
+    try {
+      const cwd = process.cwd();
+      if (cwd) {
+        candidates.push(path.join(cwd, 'icons/icon.icns'));
+      }
+    } catch {
+      // Ignore CWD errors if working directory is unmounted/invalid
+    }
     for (const c of candidates) {
-      if (fs.existsSync(c)) return c;
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch {
+        // Ignore fs error on unmounted paths
+      }
     }
   } catch {
     // Ignore

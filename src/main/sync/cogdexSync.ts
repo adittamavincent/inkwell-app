@@ -88,6 +88,14 @@ export function doSync(config: CogdexSyncConfig): { success: boolean; message: s
     };
   }
 
+  if (!fs.existsSync(vaultPath)) {
+    logger.debug('cogdexSync', `Vault path unavailable or volume unmounted: ${vaultPath}`);
+    return {
+      success: false,
+      message: `Vault path unavailable or volume unmounted: ${vaultPath}`,
+    };
+  }
+
   const lastSync = getLastSync();
   const sinceDate = lastSync || new Date(Date.now() - 24 * 60 * 60 * 1000);
   const rows = querySessionsSince(sinceDate.toISOString());
