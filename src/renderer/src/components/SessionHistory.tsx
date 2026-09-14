@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SessionPreview } from '../types';
 import { CopyIcon, CheckIcon, TrashIcon, ClockIcon } from './Icons';
 import { IconButton } from './IconButton';
@@ -9,6 +9,9 @@ interface SessionHistoryProps {
   appIcons?: Record<string, string | null>;
   onCopyText: (text: string) => void;
   onDeleteSession?: (session: SessionPreview, index: number) => void;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  isFetchingMore: boolean;
 }
 
 interface ContextMenuState {
@@ -23,9 +26,30 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   appIcons = {},
   onCopyText,
   onDeleteSession,
+  hasMore,
+  onLoadMore,
+  isFetchingMore,
 }) => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Handle scroll to detect when user reaches bottom of list
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!scrollContainerRef.current) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      // Trigger load more when within 150px of bottom
+      if (hasMore && scrollTop + clientHeight >= scrollHeight - 150) {
+        onLoadMore();
+      }
+    };
+
+    const container = scrollContainerRef.current;
+    container?.addEventListener('scroll', handleScroll);
+    return () => container?.removeEventListener('scroll', handleScroll);
+  }, [hasMore, onLoadMore]);
 
   const handleCopy = (text: string, index: number) => {
     onCopyText(text);
@@ -75,7 +99,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto space-y-3 pr-1 relative">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-1 relative">
       <div className="flex items-center justify-between px-1 select-none">
         <span className="text-[11px] font-mono text-ink-faint uppercase tracking-wider font-medium">
           Archived Sessions ({sessions.length})
@@ -147,6 +171,19 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
           </div>
         );
       })}
+
+      {/* Loading Indicator for Infinite Scroll */}
+      {isFetchingMore && (
+        <div className="flex items-center justify-center py-4 px-2">
+          <div className="flex items-center gap-2 text-xs text-ink-faint">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span>Loading more sessions...</span>
+          </div>
+        </div>
+      )}
 
       {/* Context Menu Portal / Popup */}
       {contextMenu && (

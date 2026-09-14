@@ -5,12 +5,8 @@ import { SessionHistory } from './components/SessionHistory';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { PermissionBanner } from './components/PermissionBanner';
 import { PermissionGate } from './components/PermissionGate';
-import {
-  SessionPreview,
-  KeystrokePayload,
-  SyncResponse,
-  PermissionStatus,
-} from './types';
+import { SessionPreview, KeystrokePayload, SyncResponse, PermissionStatus } from './types';
+import type { PaginatedHistoryResult, GetHistoryParams } from '@preload/index';
 import { reconstructText, stripChipMarkers } from '../../shared/reconstructor';
 import { DEFAULT_CONFIG, CogdexSyncConfig } from '../../shared/constants';
 
@@ -23,6 +19,8 @@ export const App: React.FC = () => {
   const [appIcons, setAppIcons] = useState<Record<string, string | null>>({});
   const [config, setConfig] = useState<CogdexSyncConfig>(DEFAULT_CONFIG);
   const [history, setHistory] = useState<SessionPreview[]>([]);
+  const [hasMoreHistory, setHasMoreHistory] = useState<boolean>(true);
+  const [isFetchingMoreHistory, setIsFetchingMoreHistory] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -108,7 +106,12 @@ export const App: React.FC = () => {
     if (!window.inkwellApi) return;
 
     window.inkwellApi.getConfig().then(setConfig);
-    window.inkwellApi.getHistory().then(setHistory);
+    
+    // Initial load of latest 100 history sessions
+    window.inkwellApi.getHistory({ limit: 100 }).then((result) => {
+      setHistory(result.sessions);
+      setHasMoreHistory(result.hasMore);
+    });
 
     // Initial frontmost app
     window.inkwellApi.getActiveApp?.().then(handleActiveAppInfo);
@@ -266,6 +269,34 @@ export const App: React.FC = () => {
       window.removeEventListener('focus', checkPerm);
     };
   }, [handlePermissionUpdate]);
+
+  // Load more history for infinite scroll
+  const handleLoadMoreHistory = useCallback(async () => {
+    if (isFetchingMoreHistory || !hasMoreHistory) return;
+
+    setIsFetchingMoreHistory(true);
+    try {
+      // Get the oldest session's timestamp to fetch older sessions
+      const oldestSession = history[history.length - 1];
+      let params: GetHistoryParams | undefined;
+
+      if (oldestSession && oldestSession.endIso) {
+        params = { limit: 100, before: oldestSession.endIso };
+      } else {
+        params = { limit: 100 };
+      }
+
+      const result = await window.inkwellApi?.getHistory(params);
+      if (result) {
+        setHistory((prev) => [...prev, ...result.sessions]);
+        setHasMoreHistory(result.hasMore);
+      }
+    } catch (err) {
+      console.error('Failed to load more history:', err);
+    } finally {
+      setIsFetchingMoreHistory(false);
+    }
+  }, [isFetchingMoreHistory, hasMoreHistory, history]);
 
   const handleToggleCapture = async () => {
     if (!window.inkwellApi) return;
@@ -433,6 +464,9 @@ export const App: React.FC = () => {
           appIcons={appIcons}
           onCopyText={handleCopyText}
           onDeleteSession={handleDeleteSession}
+          hasMore={hasMoreHistory}
+          onLoadMore={handleLoadMoreHistory}
+          isFetchingMore={isFetchingMoreHistory}
         />
 
         {/* Overlay backdrop when settings open on compact screens */}
