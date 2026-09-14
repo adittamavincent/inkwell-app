@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, crashReporter } from 'electron';
+import { app, BrowserWindow, Menu, shell, crashReporter, powerMonitor } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,8 +15,8 @@ import { logger } from './logger';
 import { loadConfig } from './config/store';
 import { getDatabase, closeDatabase } from './db/connection';
 import { startPermissionWatcher, stopPermissionWatcher } from './capture/permissionWatcher';
-import { stopCapture } from './capture/keyHook';
-import { stopActiveAppTracker } from './capture/activeApp';
+import { startCapture, stopCapture } from './capture/keyHook';
+import { startActiveAppTracker, stopActiveAppTracker } from './capture/activeApp';
 import { registerIpcHandlers } from './ipc/registerHandlers';
 import { setupTray, updateTrayMenu } from './tray/trayManager';
 import { getIsQuitting, setIsQuitting, requestQuit, getQuitReason } from './lifecycle';
@@ -320,10 +320,40 @@ app.whenReady().then(() => {
   createWindow();
   setupTray(() => mainWindow, showWindow, hideWindow);
 
-  // 5. Start continuous background permission watcher (initial sync + polling)
-  startPermissionWatcher((_status) => {
-    updateTrayMenu(() => mainWindow, showWindow);
-  }, 2000);
+  // 6. Ensure persistent app startup on login (macOS)
+  if (process.platform === 'darwin') {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        openAsHidden: true,
+      });
+    } catch (err) {
+      logger.warn('main', 'Failed to configure login item settings', err);
+    }
+  }
+
+  // 7. Handle OS sleep / wake and screen lock / unlock lifecycle
+  powerMonitor.on('suspend', () => {
+    logger.info('lifecycle', 'System going to sleep — pausing key capture and trackers');
+    stopCapture();
+    stopActiveAppTracker();
+  });
+
+  powerMonitor.on('resume', () => {
+    logger.info('lifecycle', 'System woke from sleep — resuming key capture and trackers');
+    startActiveAppTracker();
+    startCapture();
+  });
+
+  powerMonitor.on('lock-screen', () => {
+    logger.info('lifecycle', 'Screen locked — pausing key capture');
+    stopCapture();
+  });
+
+  powerMonitor.on('unlock-screen', () => {
+    logger.info('lifecycle', 'Screen unlocked — resuming key capture');
+    startCapture();
+  });
 
   logger.info('main', 'Initialization complete');
   logger.info('main', 'Crash reporter active', { crashDumpsDir: app.getPath('crashDumps') });
@@ -380,21 +410,19 @@ app.on('window-all-closed', () => {
 });
 
 // ── Proactive OOM guard ───────────────────────────────────────────────────
-// macOS jetsam SIGKILL is uncatchable. Instead of waiting to be killed
-// silently, self-relaunch cleanly (logged, DB closed, heartbeat marked)
-// once memory pressure crosses a threshold we choose.
-const MEMORY_CRITICAL_MB = 300;
-const FREE_MEM_CRITICAL_RATIO = 0.06;
+// macOS jetsam SIGKILL is uncatchable. Self-relaunch cleanly if process RSS
+// memory usage exceeds safety threshold (500 MB).
+// NOTE: os.freemem() is NOT used because macOS treats unallocated RAM as 0 while
+// using system buffer cache, which causes false OOM kills.
+const MEMORY_CRITICAL_MB = 500;
 let memoryGuardTimer: ReturnType<typeof setInterval> | null = null;
 
 function startMemoryGuard(): void {
   memoryGuardTimer = setInterval(() => {
     const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    const freeMemRatio = os.freemem() / os.totalmem();
-    if (rssMb > MEMORY_CRITICAL_MB || freeMemRatio < FREE_MEM_CRITICAL_RATIO) {
+    if (rssMb > MEMORY_CRITICAL_MB) {
       logger.error('main', 'Memory pressure critical — self-relaunching before likely OS force-kill', {
         rssMb,
-        freeMemRatio: Math.round(freeMemRatio * 1000) / 1000,
       });
 
       if (process.env.NODE_ENV !== 'production') {

@@ -151,7 +151,7 @@ function writeHeartbeatFile(extra?: Partial<HeartbeatPayload>): void {
       ...extra,
     };
     fs.writeFileSync(currentHeartbeatFile, JSON.stringify(payload, null, 2), 'utf-8');
-    if ((payload.rssMb ?? 0) > 250 || (payload.freeMemRatio ?? 1) < 0.08) {
+    if ((payload.rssMb ?? 0) > 350) {
       writeSync('WARN', 'lifecycle', 'Elevated memory pressure at heartbeat', payload);
     }
   } catch {

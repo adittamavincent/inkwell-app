@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getIsQuitting, setIsQuitting, requestQuit, _resetLifecycleForTesting } from '../src/main/lifecycle';
 
-const { mockApp, mockMenuBuildFromTemplate, mockTrayInstance } = vi.hoisted(() => {
+const { mockApp, mockMenuBuildFromTemplate, mockTrayInstance, mockPowerMonitor } = vi.hoisted(() => {
+  const listeners: Record<string, Function[]> = {};
   return {
     mockApp: {
       quit: vi.fn(),
       getAppPath: vi.fn(() => '/mock/app/path'),
+      setLoginItemSettings: vi.fn(),
       dock: {
         show: vi.fn(),
         hide: vi.fn(),
@@ -18,11 +20,24 @@ const { mockApp, mockMenuBuildFromTemplate, mockTrayInstance } = vi.hoisted(() =
       setContextMenu: vi.fn(),
       on: vi.fn(),
     },
+    mockPowerMonitor: {
+      on: vi.fn((event: string, callback: Function) => {
+        if (!listeners[event]) listeners[event] = [];
+        listeners[event].push(callback);
+      }),
+      emit: (event: string) => {
+        if (listeners[event]) {
+          listeners[event].forEach((cb) => cb());
+        }
+      },
+      listeners,
+    },
   };
 });
 
 vi.mock('electron', () => ({
   app: mockApp,
+  powerMonitor: mockPowerMonitor,
   Menu: {
     buildFromTemplate: (template: any) => {
       mockMenuBuildFromTemplate(template);
@@ -46,6 +61,11 @@ vi.mock('../src/main/capture/keyHook', () => ({
   isCaptureRunning: vi.fn(() => true),
   startCapture: vi.fn(),
   stopCapture: vi.fn(),
+}));
+
+vi.mock('../src/main/capture/activeApp', () => ({
+  startActiveAppTracker: vi.fn(),
+  stopActiveAppTracker: vi.fn(),
 }));
 
 describe('Lifecycle & Menu-Bar Persistence', () => {
@@ -199,6 +219,39 @@ describe('Lifecycle & Menu-Bar Persistence', () => {
 
     expect(getIsQuitting()).toBe(true);
     expect(mockApp.quit).toHaveBeenCalledTimes(1);
+  });
+
+  it('powerMonitor handles suspend and resume events', async () => {
+    const { stopCapture, startCapture } = await import('../src/main/capture/keyHook');
+    const { stopActiveAppTracker, startActiveAppTracker } = await import('../src/main/capture/activeApp');
+
+    let suspendCb: Function | undefined;
+    let resumeCb: Function | undefined;
+
+    mockPowerMonitor.on.mockImplementation((event: string, cb: Function) => {
+      if (event === 'suspend') suspendCb = cb;
+      if (event === 'resume') resumeCb = cb;
+    });
+
+    mockPowerMonitor.on('suspend', () => {
+      stopCapture();
+      stopActiveAppTracker();
+    });
+    mockPowerMonitor.on('resume', () => {
+      startActiveAppTracker();
+      startCapture();
+    });
+
+    expect(suspendCb).toBeDefined();
+    expect(resumeCb).toBeDefined();
+
+    suspendCb?.();
+    expect(stopCapture).toHaveBeenCalled();
+    expect(stopActiveAppTracker).toHaveBeenCalled();
+
+    resumeCb?.();
+    expect(startActiveAppTracker).toHaveBeenCalled();
+    expect(startCapture).toHaveBeenCalled();
   });
 });
 
