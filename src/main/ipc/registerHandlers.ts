@@ -15,7 +15,7 @@ import {
 } from '../capture/permissions';
 import { checkAndSyncPermissionState } from '../capture/permissionWatcher';
 import { getFrontmostAppInfo, getOrResolveAppIcon } from '../capture/activeApp';
-import { loadAllHistory, clearHistory, deleteSessionEntry } from '../db/repository';
+import { loadHistoryPaginated, clearHistory, deleteSessionEntry } from '../db/repository';
 import { getConfig, saveConfig, CogdexSyncConfig } from '../config/store';
 import { doSync } from '../sync/cogdexSync';
 import { updateTrayMenu } from '../tray/trayManager';
@@ -76,9 +76,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     openAccessibilitySettings();
   });
 
-  ipcMain.handle('inkwell:getHistory', () => {
+  ipcMain.handle('inkwell:getHistory', (_event, params?: { limit?: number; before?: string }) => {
     const config = getConfig();
-    return loadAllHistory(config.idleTimeoutSecs);
+    return loadHistoryPaginated({
+      limit: params?.limit ?? 100,
+      before: params?.before,
+      idleTimeoutSecs: config.idleTimeoutSecs,
+    });
   });
 
   ipcMain.handle('inkwell:clearHistory', () => {

@@ -21,6 +21,17 @@ export interface ActiveAppInfo {
   icon: string | null;
 }
 
+export interface PaginatedHistoryResult {
+  sessions: SessionPreview[];
+  hasMore: boolean;
+  oldestTimestamp?: string;
+}
+
+export interface GetHistoryParams {
+  limit?: number;
+  before?: string;
+}
+
 export const api = {
   // Keystroke Stream Listener
   onKeystroke: (callback: (payload: KeystrokePayload) => void) => {
@@ -96,8 +107,8 @@ export const api = {
   },
 
   // History Actions
-  getHistory: (): Promise<SessionPreview[]> => {
-    return ipcRenderer.invoke('inkwell:getHistory');
+  getHistory: (params?: GetHistoryParams): Promise<PaginatedHistoryResult> => {
+    return ipcRenderer.invoke('inkwell:getHistory', params);
   },
   clearHistory: (): Promise<void> => {
     return ipcRenderer.invoke('inkwell:clearHistory');

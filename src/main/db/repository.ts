@@ -34,6 +34,86 @@ export function querySessionsSince(sinceIso: string): Array<[string, string, str
   return rows.map((r) => [r.timestamp, r.app_name || 'Unknown', decrypt(r.key_char)]);
 }
 
+export interface PaginatedHistoryOptions {
+  limit?: number;
+  before?: string;
+  idleTimeoutSecs?: number;
+}
+
+export interface PaginatedHistoryResult {
+  sessions: SessionPreview[];
+  hasMore: boolean;
+  oldestTimestamp?: string;
+}
+
+export function loadHistoryPaginated(
+  options: PaginatedHistoryOptions = {}
+): PaginatedHistoryResult {
+  const limit = options.limit ?? 100;
+  const idleTimeoutSecs = options.idleTimeoutSecs ?? 60;
+  const beforeIso = options.before;
+
+  const db = getDatabase();
+  const chunkSize = Math.max(limit * 50, 2000);
+  let rows: Array<{ id: number; timestamp: string; app_name: string; key_char: string }> = [];
+
+  if (beforeIso) {
+    const stmt = db.prepare(`
+      SELECT id, timestamp, app_name, key_char
+      FROM keystrokes
+      WHERE timestamp < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `);
+    rows = stmt.all(beforeIso, chunkSize) as any;
+  } else {
+    const stmt = db.prepare(`
+      SELECT id, timestamp, app_name, key_char
+      FROM keystrokes
+      ORDER BY id DESC
+      LIMIT ?
+    `);
+    rows = stmt.all(chunkSize) as any;
+  }
+
+  if (rows.length === 0) {
+    return { sessions: [], hasMore: false };
+  }
+
+  const oldestRow = rows[rows.length - 1];
+  const countBeforeStmt = db.prepare('SELECT COUNT(*) as count FROM keystrokes WHERE id < ?');
+  const countBeforeResult = countBeforeStmt.get(oldestRow.id) as { count: number };
+  const hasOlderRowsInDb = (countBeforeResult?.count ?? 0) > 0;
+
+  const rowsAsc = [...rows].reverse();
+  const decryptedRows: Array<[string, string, string]> = rowsAsc.map((r) => [
+    r.timestamp,
+    r.app_name || 'Unknown',
+    decrypt(r.key_char),
+  ]);
+
+  let sessions = groupSessions(decryptedRows, idleTimeoutSecs).reverse();
+
+  let hasMore = hasOlderRowsInDb;
+  if (sessions.length > limit) {
+    hasMore = true;
+    sessions = sessions.slice(0, limit);
+  }
+
+  const oldestSession = sessions[sessions.length - 1];
+  const oldestTimestamp = oldestSession
+    ? typeof oldestSession.start === 'string'
+      ? oldestSession.start
+      : oldestSession.start.toISOString()
+    : undefined;
+
+  return {
+    sessions,
+    hasMore,
+    oldestTimestamp,
+  };
+}
+
 export function loadAllHistory(idleTimeoutSecs = 60): SessionPreview[] {
   const db = getDatabase();
   const stmt = db.prepare(`
