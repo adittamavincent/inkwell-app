@@ -32,6 +32,7 @@
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@locator/babel-jsx": "^0.5.1",
     "@locator/runtime": "^0.5.1",
     "@locator/webpack-loader": "^0.5.1",
