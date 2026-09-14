@@ -10,6 +10,7 @@ module.exports = {
   },
   files: ['dist/**/*', 'dist-electron/**/*', 'icons/**/*', 'package.json'],
   asarUnpack: ['**/*.node'],
+  beforeBuild: 'build/beforeBuild.cjs',
   afterPack: 'build/afterPack.cjs',
   mac: {
     extendInfo: { LSUIElement: true },

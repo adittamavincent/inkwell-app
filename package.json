@@ -6,7 +6,8 @@
   "author": "Vincent",
   "main": "dist-electron/main/index.js",
   "scripts": {
-    "postinstall": "export PYTHON=/usr/bin/python3 && electron-builder install-app-deps && patch-package",
+    "postinstall": "export PYTHON=/usr/bin/python3 && electron-builder install-app-deps && patch-package; pnpm run rebuild:native",
+    "rebuild:native": "node -e \"require('./build/ensure-native-abi.cjs').ensureNativeAbi()\"",
     "dev": "vite",
     "generate-icons": "node scripts/build-icons.js",
     "compile": "tsc && vite build",

@@ -1,94 +1,36 @@
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-
-// Electron 33.2.1 ships Node ABI (NODE_MODULE_VERSION) 130.
-// The local system Node is a different ABI, so any .node built by a plain
-// `npm/pnpm rebuild` will fail at runtime with ERR_DLOPEN_FAILED.
-const ELECTRON_TARGET = '33.2.1';
-const ELECTRON_ABI = 130;
+const { detectAbi, ELECTRON_ABI, ELECTRON_TARGET } = require('./ensure-native-abi.cjs');
 
 /**
- * Locate node-gyp. pnpm does not hoist it to the root node_modules, so a plain
- * require.resolve from the project root fails; fall back to scanning .pnpm.
+ * Fail the build if a binary with the wrong ABI made it into the bundle.
+ * The rebuild itself happens in beforeBuild (the packaged module has no
+ * binding.gyp, so it cannot be rebuilt here); this is a last-line guard.
  */
-function resolveNodeGyp() {
-  const root = path.join(__dirname, '..');
-  try {
-    return require.resolve('node-gyp/bin/node-gyp.js', { paths: [root] });
-  } catch {
-    // fall through to .pnpm scan
-  }
-
-  const pnpmDir = path.join(root, 'node_modules/.pnpm');
-  if (fs.existsSync(pnpmDir)) {
-    const candidates = fs
-      .readdirSync(pnpmDir)
-      .filter((d) => d.startsWith('node-gyp@'))
-      .sort()
-      .reverse()
-      .map((d) => path.join(pnpmDir, d, 'node_modules/node-gyp/bin/node-gyp.js'))
-      .filter((p) => fs.existsSync(p));
-    if (candidates.length) return candidates[0];
-  }
-
-  throw new Error('[afterPack] Could not locate node-gyp to rebuild native modules.');
-}
-
-/**
- * Verify the packaged better-sqlite3 binary targets Electron's ABI, and
- * rebuild it in place if it does not. Runs BEFORE codesigning, because
- * replacing a binary after signing invalidates the app signature.
- */
-function ensureNativeAbi(appPath) {
-  const moduleDir = path.join(
+function verifyPackagedAbi(appPath) {
+  const binary = path.join(
     appPath,
-    'Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3'
+    'Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
   );
-  const binary = path.join(moduleDir, 'build/Release/better_sqlite3.node');
-
+  // A missing binary is fatal, not skippable: the app cannot open its database
+  // without it. This also catches app.asar.unpacked being dropped entirely.
   if (!fs.existsSync(binary)) {
-    console.warn(`[afterPack] better_sqlite3.node not found at ${binary}; skipping ABI check.`);
-    return;
-  }
-
-  // The binary reports its own ABI when a mismatched runtime tries to load it.
-  const probe = `try{process.dlopen({exports:{}},${JSON.stringify(binary)});console.log(process.versions.modules)}catch(e){const m=/NODE_MODULE_VERSION (\\d+)/.exec(e.message);console.log(m?m[1]:'unknown')}`;
-  const actualAbi = execSync(`node -e ${JSON.stringify(probe)}`).toString().trim();
-
-  if (actualAbi === String(ELECTRON_ABI)) {
-    console.log(`[afterPack] better-sqlite3 ABI ${actualAbi} matches Electron ${ELECTRON_TARGET}.`);
-    return;
-  }
-
-  console.log(
-    `[afterPack] ABI mismatch: better-sqlite3 is ${actualAbi}, Electron ${ELECTRON_TARGET} needs ${ELECTRON_ABI}. Rebuilding...`
-  );
-
-  const nodeGyp = resolveNodeGyp();
-
-  execSync(
-    `node "${nodeGyp}" rebuild --release --arch=${context_arch()} --target=${ELECTRON_TARGET} --dist-url=https://electronjs.org/headers`,
-    {
-      cwd: moduleDir,
-      env: { ...process.env, PYTHON: process.env.PYTHON || '/usr/bin/python3' },
-      stdio: 'inherit',
-    }
-  );
-
-  const rebuiltAbi = execSync(`node -e ${JSON.stringify(probe)}`).toString().trim();
-  if (rebuiltAbi !== String(ELECTRON_ABI)) {
     throw new Error(
-      `[afterPack] Rebuild produced ABI ${rebuiltAbi}, expected ${ELECTRON_ABI}. Aborting to avoid shipping a broken app.`
+      `[afterPack] better_sqlite3.node is missing from the bundle (expected at ${binary}). ` +
+        `The app would crash on startup. Check that beforeBuild returns true so electron-builder ` +
+        `installs production node_modules.`
     );
   }
-  console.log(`[afterPack] Rebuilt better-sqlite3 for Electron ABI ${ELECTRON_ABI}.`);
-}
 
-// electron-builder exposes arch as an enum; map to a node-gyp arch string.
-let currentArch = 'arm64';
-function context_arch() {
-  return currentArch;
+  const abi = detectAbi(binary);
+  if (abi !== String(ELECTRON_ABI)) {
+    throw new Error(
+      `[afterPack] Packaged better-sqlite3 has ABI ${abi}, but Electron ${ELECTRON_TARGET} requires ${ELECTRON_ABI}. ` +
+        `The app would crash on startup with ERR_DLOPEN_FAILED. Run "pnpm rebuild:native" and rebuild.`
+    );
+  }
+  console.log(`[afterPack] Verified packaged better-sqlite3 ABI ${abi}.`);
 }
 
 exports.default = async function (context) {
@@ -96,10 +38,7 @@ exports.default = async function (context) {
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   const entitlementsPath = path.join(__dirname, 'entitlements.mac.plist');
 
-  const { Arch } = require('builder-util');
-  currentArch = Arch[context.arch] === 'x64' ? 'x64' : 'arm64';
-
-  ensureNativeAbi(appPath);
+  verifyPackagedAbi(appPath);
 
   const hasSigningIdentity = !!process.env.CSC_NAME;
   if (hasSigningIdentity) {
