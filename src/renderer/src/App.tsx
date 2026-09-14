@@ -134,6 +134,35 @@ export const App: React.FC = () => {
       const timedOut =
         lastKeyTimeRef.current > 0 && now - lastKeyTimeRef.current > idleLimitMs;
 
+      const isBreakToken =
+        payload.keyChar === '[CLICK]' ||
+        payload.keyChar === '[CLICK:LEFT]' ||
+        payload.keyChar === '[⌘A]';
+
+      if (isBreakToken) {
+        // Force commit of active live session into history
+        if (liveTokensRef.current.length > 0) {
+          const reconstructed = reconstructText(liveTokensRef.current);
+          if (reconstructed.trim()) {
+            const finishedSession: SessionPreview = {
+              start: liveStartRef.current || new Date().toISOString(),
+              app: liveAppRef.current || 'Unknown',
+              text: reconstructed,
+            };
+            setHistory((prev) => [finishedSession, ...prev]);
+          }
+        }
+        liveTokensRef.current = [];
+        liveAppRef.current = '';
+        liveStartRef.current = null;
+        setLiveTokens([]);
+        setLiveText('');
+        setLiveStart(null);
+        setLiveApp('');
+        lastKeyTimeRef.current = now;
+        return;
+      }
+
       if (timedOut) {
         // Idle gap splits unconditionally
         if (liveTokensRef.current.length > 0) {

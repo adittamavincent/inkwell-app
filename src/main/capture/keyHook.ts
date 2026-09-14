@@ -266,6 +266,30 @@ function handleKeyUp(e: UiohookKeyboardEventLike): void {
   }
 }
 
+function handleMouseDown(e: { button?: number }): void {
+  try {
+    // button 1 (or 0/default) is Left Mouse Click in uiohook-napi
+    if (e.button === 1 || e.button === undefined || e.button === 0) {
+      const appName = getFrontmostAppName();
+      const config = getConfig();
+      if (isAppExcluded(appName, config.excludedApps)) {
+        return;
+      }
+      queue.push({
+        timestamp: new Date().toISOString(),
+        appName,
+        keyChar: '[CLICK]',
+        keyCode: 0,
+      });
+      setImmediate(() => {
+        processQueue();
+      });
+    }
+  } catch (err) {
+    logger.error('keyHook', 'Unhandled error in handleMouseDown', err);
+  }
+}
+
 export function startCapture(): boolean {
   if (isRunning) return true;
 
@@ -283,8 +307,10 @@ export function startCapture(): boolean {
     const uIOhook = getHook();
     uIOhook.removeAllListeners('keydown');
     uIOhook.removeAllListeners('keyup');
+    uIOhook.removeAllListeners('mousedown');
     uIOhook.on('keydown', handleKeyDown);
     uIOhook.on('keyup', handleKeyUp);
+    uIOhook.on('mousedown', handleMouseDown);
     uIOhook.start();
 
     isRunning = true;
@@ -304,6 +330,7 @@ export function stopCapture(): boolean {
     if (hook) {
       hook.removeAllListeners('keydown');
       hook.removeAllListeners('keyup');
+      hook.removeAllListeners('mousedown');
       if (isRunning) {
         hook.stop();
       }

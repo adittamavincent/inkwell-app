@@ -65,6 +65,21 @@ export function groupSessions(
       continue;
     }
 
+    // Session break tokens: left click ([CLICK], [CLICK:LEFT]) or select-all ([⌘A])
+    const isSessionBreakToken =
+      cleanKey === '[CLICK]' ||
+      cleanKey === '[CLICK:LEFT]' ||
+      cleanKey === '[⌘A]';
+
+    if (isSessionBreakToken) {
+      if (state.activeSession) {
+        sessions.push(state.activeSession);
+        state.activeSession = null;
+      }
+      state.lastKeystrokeTs = 0;
+      continue;
+    }
+
     const currentTs = new Date(ts).getTime();
     const isIdleTimeout =
       state.lastKeystrokeTs > 0 && !isNaN(currentTs) && currentTs - state.lastKeystrokeTs > idleMs;

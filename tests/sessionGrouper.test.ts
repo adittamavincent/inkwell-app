@@ -92,4 +92,35 @@ describe('groupSessions', () => {
     expect(sessions[0].startIso).toBe('2026-08-30T10:00:00Z');
     expect(sessions[0].endIso).toBe('2026-08-30T10:00:10Z');
   });
+
+  it('commits active session to history when left click ([CLICK]) or select-all ([⌘A]) occurs', () => {
+    const rows = [
+      ['2026-08-30T10:00:00Z', 'Notes', 'f'],
+      ['2026-08-30T10:00:01Z', 'Notes', 'i'],
+      ['2026-08-30T10:00:02Z', 'Notes', 'r'],
+      ['2026-08-30T10:00:03Z', 'Notes', 's'],
+      ['2026-08-30T10:00:04Z', 'Notes', 't'],
+      // Left click repositions cursor
+      ['2026-08-30T10:00:05Z', 'Notes', '[CLICK]'],
+      ['2026-08-30T10:00:06Z', 'Notes', 's'],
+      ['2026-08-30T10:00:07Z', 'Notes', 'e'],
+      ['2026-08-30T10:00:08Z', 'Notes', 'c'],
+      ['2026-08-30T10:00:09Z', 'Notes', 'o'],
+      ['2026-08-30T10:00:10Z', 'Notes', 'n'],
+      ['2026-08-30T10:00:11Z', 'Notes', 'd'],
+      // Cmd+A selects all
+      ['2026-08-30T10:00:12Z', 'Notes', '[⌘A]'],
+      ['2026-08-30T10:00:13Z', 'Notes', 't'],
+      ['2026-08-30T10:00:14Z', 'Notes', 'h'],
+      ['2026-08-30T10:00:15Z', 'Notes', 'i'],
+      ['2026-08-30T10:00:16Z', 'Notes', 'r'],
+      ['2026-08-30T10:00:17Z', 'Notes', 'd'],
+    ] as [string, string, string][];
+
+    const sessions = groupSessions(rows, 60);
+    expect(sessions).toHaveLength(3);
+    expect(sessions[0].text).toBe('first');
+    expect(sessions[1].text).toBe('second');
+    expect(sessions[2].text).toBe('third');
+  });
 });
