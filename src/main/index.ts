@@ -410,23 +410,44 @@ app.on('window-all-closed', () => {
 });
 
 // ── Proactive OOM guard ───────────────────────────────────────────────────
-// macOS jetsam SIGKILL is uncatchable. Self-relaunch cleanly if process RSS
-// memory usage exceeds safety threshold (500 MB).
+// macOS jetsam SIGKILL is uncatchable. Self-relaunch cleanly when:
+//   a) Process RSS exceeds 500 MB (process-level pressure), OR
+//   b) System free memory drops below 5% (system-level pressure — the
+//      actual root cause of the two jetsam kills in the log at 1.4% and 1.0%)
 // NOTE: os.freemem() is NOT used because macOS treats unallocated RAM as 0 while
 // using system buffer cache, which causes false OOM kills.
 const MEMORY_CRITICAL_MB = 500;
+const SYSTEM_FREE_MEM_CRITICAL_RATIO = 0.05; // below 5% free → jetsam risk
 let memoryGuardTimer: ReturnType<typeof setInterval> | null = null;
 
 function startMemoryGuard(): void {
   memoryGuardTimer = setInterval(() => {
     const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    if (rssMb > MEMORY_CRITICAL_MB) {
-      logger.error('main', 'Memory pressure critical — self-relaunching before likely OS force-kill', {
-        rssMb,
-      });
+    const freeMemRatio = Math.round((os.freemem() / os.totalmem()) * 1000) / 1000;
+
+    const processOOM = rssMb > MEMORY_CRITICAL_MB;
+    const systemOOM = freeMemRatio < SYSTEM_FREE_MEM_CRITICAL_RATIO;
+
+    if (processOOM || systemOOM) {
+      if (processOOM) {
+        logger.error('main', 'Memory pressure critical (process RSS) — self-relaunching before likely OS force-kill', {
+          rssMb,
+          freeMemRatio,
+          trigger: 'process-rss',
+        });
+      } else {
+        logger.error('main', 'Memory pressure critical (system free) — self-relaunching before likely jetsam SIGKILL', {
+          rssMb,
+          freeMemRatio,
+          trigger: 'system-free',
+        });
+      }
 
       if (process.env.NODE_ENV !== 'production') {
-        logger.warn('main', 'Skipping OOM self-relaunch because app is running in non-production mode');
+        logger.warn('main', 'Skipping OOM self-relaunch because app is running in non-production mode', {
+          rssMb,
+          freeMemRatio,
+        });
         return;
       }
 

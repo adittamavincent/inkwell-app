@@ -154,6 +154,11 @@ function writeHeartbeatFile(extra?: Partial<HeartbeatPayload>): void {
     if ((payload.rssMb ?? 0) > 350) {
       writeSync('WARN', 'lifecycle', 'Elevated memory pressure at heartbeat', payload);
     }
+    // Warn when system free memory is critically low — this is the actual trigger for macOS
+    // jetsam SIGKILL, which is uncatchable. Log early so we have evidence before it happens.
+    if ((payload.freeMemRatio ?? 1) < 0.05) {
+      writeSync('WARN', 'lifecycle', 'System memory critically low — jetsam OOM kill risk', payload);
+    }
   } catch {
     // Heartbeat failure must never affect the app
   }
