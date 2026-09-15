@@ -151,14 +151,10 @@ function writeHeartbeatFile(extra?: Partial<HeartbeatPayload>): void {
       ...extra,
     };
     fs.writeFileSync(currentHeartbeatFile, JSON.stringify(payload, null, 2), 'utf-8');
-    if ((payload.rssMb ?? 0) > 350) {
-      writeSync('WARN', 'lifecycle', 'Elevated memory pressure at heartbeat', payload);
-    }
-    // Warn when system free memory is critically low — this is the actual trigger for macOS
-    // jetsam SIGKILL, which is uncatchable. Log early so we have evidence before it happens.
-    if ((payload.freeMemRatio ?? 1) < 0.05) {
-      writeSync('WARN', 'lifecycle', 'System memory critically low — jetsam OOM kill risk', payload);
-    }
+    // NOTE: OOM/memory pressure logging is intentionally NOT done here.
+    // The startMemoryGuard() interval in index.ts handles all OOM detection and
+    // logging with proper context (process-RSS vs system-free distinction).
+    // Duplicating it here would produce double log entries every 20 seconds.
   } catch {
     // Heartbeat failure must never affect the app
   }
@@ -188,7 +184,8 @@ function scanForNativeCrashEvidence(sinceMs: number): string[] {
 
 function startHeartbeat(): void {
   if (heartbeatTimer) return;
-  writeHeartbeatFile({ cleanShutdown: false });
+  // NOTE: No initial writeHeartbeatFile() here — checkPreviousRun() already writes
+  // the first heartbeat for the current run. Writing again here would be redundant.
   heartbeatTimer = setInterval(() => {
     writeHeartbeatFile({ cleanShutdown: false });
   }, HEARTBEAT_INTERVAL_MS);
