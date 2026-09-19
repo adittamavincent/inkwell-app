@@ -142,11 +142,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
         <div className="space-y-1.5">
           <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
             <span>Day Folder Pattern</span>
-            <span className="text-ink-muted font-mono text-[11px]">(moment format)</span>
+            <span className="text-ink-muted font-mono text-[11px]">(%Y-%m-%d format)</span>
           </label>
           <input
             type="text"
-            placeholder="YYYY/MM-MMM/YYYY-MM-DD"
+            placeholder="%Y-%m-%d"
             value={form.dayPattern}
             onChange={(e) => setForm({ ...form, dayPattern: e.target.value })}
             className="w-full bg-ink-bg border border-ink-border rounded-md px-2.5 py-1.5 text-ink-text font-mono text-xs focus:border-ink-accent focus:ring-1 focus:ring-ink-accent-light/40 transition-colors"
@@ -172,7 +172,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
         <div className="space-y-1.5">
           <label className="block font-medium text-ink-text text-xs flex items-center justify-between">
             <span>Idle Timeout (seconds)</span>
-            <span className="text-ink-muted font-mono text-[11px]">(Default 120s)</span>
+            <span className="text-ink-muted font-mono text-[11px]">(Default 60s)</span>
           </label>
           <input
             type="number"

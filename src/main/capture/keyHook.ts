@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { BrowserWindow, clipboard } from 'electron';
+import { clipboard } from 'electron';
 import { mapKeyEventToToken, ModifierState, UiohookKeyboardEventLike, KEY } from './keyMapper';
 import { getFrontmostAppName } from './activeApp';
 import { checkAccessibilityStatus, checkInputMonitoringStatus } from './permissions';
@@ -7,6 +7,7 @@ import { getConfig } from '../config/store';
 import { insertKeystroke } from '../db/repository';
 import { doSync } from '../sync/cogdexSync';
 import { logger } from '../logger';
+import { broadcast } from '../broadcast';
 
 const require = createRequire(import.meta.url);
 
@@ -15,11 +16,35 @@ interface QueuedKeystroke {
   appName: string;
   keyChar: string;
   keyCode: number;
+  resolveToken?: () => string;
 }
 
 let isRunning = false;
+let captureEnabled = true;
+const blockers = new Set<string>();
+let statusListener: (() => void) | undefined;
+export function onCaptureStatusChanged(listener: () => void): void {
+  statusListener = listener;
+}
+function publishStatus(): void {
+  broadcast('inkwell:captureStatusChanged', isRunning);
+  statusListener?.();
+}
+export function setCaptureEnabled(enabled: boolean): boolean {
+  captureEnabled = enabled;
+  if (enabled) startCapture();
+  else stopCapture();
+  return isRunning;
+}
+export function setCaptureBlocked(reason: string, blocked: boolean): void {
+  if (blocked) blockers.add(reason);
+  else blockers.delete(reason);
+  if (blockers.size) stopCapture();
+  else startCapture();
+}
 const queue: QueuedKeystroke[] = [];
 let isProcessingQueue = false;
+let persistenceRetry: ReturnType<typeof setTimeout> | null = null;
 const recentKeys: string[] = [];
 let lastSeenApp = '';
 
@@ -39,10 +64,10 @@ function getSafeClipboardText(): string | null {
   }
 }
 
-// Background sync: runs every 5s while capture is active
+// Background sync runs independently of capture while the app is alive.
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 
-function startBackgroundSync(): void {
+export function startBackgroundSync(): void {
   stopBackgroundSync();
   syncTimer = setInterval(() => {
     const config = getConfig();
@@ -55,7 +80,7 @@ function startBackgroundSync(): void {
   }, 5000);
 }
 
-function stopBackgroundSync(): void {
+export function stopBackgroundSync(): void {
   if (syncTimer !== null) {
     clearInterval(syncTimer);
     syncTimer = null;
@@ -114,8 +139,8 @@ function isAppExcluded(appName: string, excludedList: string[]): boolean {
   return false;
 }
 
-async function processQueue(): Promise<void> {
-  if (isProcessingQueue) return;
+export function flushCaptureQueue(): void {
+  if (isProcessingQueue || persistenceRetry) return;
   isProcessingQueue = true;
 
   try {
@@ -123,30 +148,42 @@ async function processQueue(): Promise<void> {
       const item = queue.shift();
       if (!item) continue;
 
+      if (item.resolveToken) {
+        item.keyChar = item.resolveToken();
+        item.resolveToken = undefined;
+      }
+
+      let id: number | undefined;
       // 1. Write to SQLite
       try {
-        insertKeystroke(item.timestamp, item.appName, item.keyChar, item.keyCode);
+        id = insertKeystroke(item.timestamp, item.appName, item.keyChar, item.keyCode);
       } catch (err) {
-        logger.error('keyHook', 'Failed to persist keystroke', err);
+        logger.error('keyHook', 'Failed to persist keystroke; pausing capture until storage recovers', err);
+        queue.unshift(item);
+        persistenceRetry = setTimeout(() => {
+          persistenceRetry = null;
+          flushCaptureQueue();
+        }, 2000);
+        if (isRunning) {
+          setCaptureEnabled(false);
+          broadcast('inkwell:backendError', 'Storage is unavailable. Capture was paused; pending keys will be retried. Resume capture after storage recovers.');
+        }
+        break;
       }
 
       // 2. Broadcast to UI windows
-      const allWindows = BrowserWindow.getAllWindows();
-      for (const win of allWindows) {
-        if (!win.isDestroyed()) {
-          win.webContents.send('inkwell:keystroke', {
-            timestamp: item.timestamp,
-            appName: item.appName,
-            keyChar: item.keyChar,
-          });
-        }
-      }
+      broadcast('inkwell:keystroke', {
+        id,
+        timestamp: item.timestamp,
+        appName: item.appName,
+        keyChar: item.keyChar,
+      });
     }
   } finally {
     isProcessingQueue = false;
-    if (queue.length > 0) {
+    if (queue.length > 0 && !persistenceRetry) {
       setImmediate(() => {
-        processQueue();
+        flushCaptureQueue();
       });
     }
   }
@@ -213,49 +250,16 @@ function _handleKeyDownInner(e: UiohookKeyboardEventLike): void {
     return;
   }
 
-  if (needsClipRead) {
-    // Defer clipboard read to main thread; enqueue with the literal token for now.
-    queue.push({
-      timestamp: new Date().toISOString(),
-      appName,
-      keyChar: finalToken,
-      keyCode: e.keycode,
-    });
-    setImmediate(() => {
-      try {
-        const clipText = getSafeClipboardText();
-        if (clipText) {
-          const b64 = Buffer.from(clipText, 'utf8').toString('base64');
-          if (clipTrigger === 'paste') {
-            finalToken = `[PASTE:b64:${b64}]`;
-          } else if (clipTrigger === 'q3q') {
-            finalToken = `[Q3Q:b64:${b64}]`;
-          } else {
-            finalToken = `[Q4Q:b64:${b64}]`;
-          }
-          // Update the last queued item with the resolved token
-          const last = queue[queue.length - 1];
-          if (last && last.keyCode === e.keycode) {
-            last.keyChar = finalToken;
-          }
-        }
-      } catch {
-        // clipboard read failed — keep the literal token
-      }
-      processQueue();
-    });
-  } else {
-    // Fast push to memory queue (< 0.1ms) for non-clipboard tokens
-    queue.push({
-      timestamp: new Date().toISOString(),
-      appName,
-      keyChar: finalToken,
-      keyCode: e.keycode,
-    });
-    setImmediate(() => {
-      processQueue();
-    });
-  }
+  queue.push({
+    timestamp: new Date().toISOString(), appName, keyChar: finalToken, keyCode: e.keycode,
+    resolveToken: needsClipRead ? () => {
+      const clipText = getSafeClipboardText();
+      if (!clipText) return token;
+      const prefix = clipTrigger === 'paste' ? 'PASTE' : clipTrigger === 'q3q' ? 'Q3Q' : 'Q4Q';
+      return `[${prefix}:b64:${Buffer.from(clipText, 'utf8').toString('base64')}]`;
+    } : undefined,
+  });
+  setImmediate(flushCaptureQueue);
 }
 
 function handleKeyUp(e: UiohookKeyboardEventLike): void {
@@ -282,7 +286,7 @@ function handleMouseDown(e: { button?: number }): void {
         keyCode: 0,
       });
       setImmediate(() => {
-        processQueue();
+        flushCaptureQueue();
       });
     }
   } catch (err) {
@@ -290,20 +294,22 @@ function handleMouseDown(e: { button?: number }): void {
   }
 }
 
+let lastStartFailure = 0;
 export function startCapture(): boolean {
   if (isRunning) return true;
-
-  // 1. Strict pre-flight verification: NEVER start uIOhook without authorized accessibility & input monitoring
-  const accessibility = checkAccessibilityStatus();
-  const inputMonitoring = checkInputMonitoringStatus();
-
-  if (accessibility !== 'authorized' || inputMonitoring !== 'authorized') {
-    logger.warn('keyHook', `Cannot start capture — permissions not fully authorized (Accessibility: ${accessibility}, Input Monitoring: ${inputMonitoring})`);
-    isRunning = false;
-    return false;
-  }
+  if (!captureEnabled || blockers.size || (lastStartFailure && Date.now() - lastStartFailure < 5000)) return false;
 
   try {
+    // 1. Strict pre-flight verification: NEVER start uIOhook without authorized accessibility & input monitoring
+    const accessibility = checkAccessibilityStatus();
+    const inputMonitoring = checkInputMonitoringStatus();
+
+    if (accessibility !== 'authorized' || inputMonitoring !== 'authorized') {
+      logger.warn('keyHook', `Cannot start capture — permissions not fully authorized (Accessibility: ${accessibility}, Input Monitoring: ${inputMonitoring})`);
+      isRunning = false;
+      return false;
+    }
+
     const uIOhook = getHook();
     uIOhook.removeAllListeners('keydown');
     uIOhook.removeAllListeners('keyup');
@@ -314,10 +320,12 @@ export function startCapture(): boolean {
     uIOhook.start();
 
     isRunning = true;
-    startBackgroundSync();
+    lastStartFailure = 0;
+    publishStatus();
     logger.info('keyHook', 'Capture started successfully');
     return true;
   } catch (err) {
+    lastStartFailure = Date.now();
     logger.error('keyHook', 'Failed to start uiohook key capture', err);
     isRunning = false;
     return false;
@@ -325,7 +333,6 @@ export function startCapture(): boolean {
 }
 
 export function stopCapture(): boolean {
-  stopBackgroundSync();
   try {
     if (hook) {
       hook.removeAllListeners('keydown');
@@ -340,8 +347,18 @@ export function stopCapture(): boolean {
     logger.error('keyHook', 'Failed to stop uiohook key capture', err);
   } finally {
     isRunning = false;
+    modifiers.shift = modifiers.ctrl = modifiers.alt = modifiers.meta = false;
+    recentKeys.length = 0;
+    flushCaptureQueue();
+    publishStatus();
   }
   return true;
+}
+
+export function discardPendingCapture(): void {
+  queue.length = 0;
+  if (persistenceRetry) clearTimeout(persistenceRetry);
+  persistenceRetry = null;
 }
 
 export function restartCapture(): boolean {

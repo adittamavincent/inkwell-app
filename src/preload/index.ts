@@ -6,6 +6,7 @@ import type { AuthStatus, PermissionStatus } from '../main/capture/permissions';
 export type { AuthStatus, PermissionStatus };
 
 export interface KeystrokePayload {
+  id?: number;
   timestamp: string;
   appName: string;
   keyChar: string;
@@ -25,11 +26,13 @@ export interface PaginatedHistoryResult {
   sessions: SessionPreview[];
   hasMore: boolean;
   oldestTimestamp?: string;
+  nextBeforeId?: number;
 }
 
 export interface GetHistoryParams {
   limit?: number;
   before?: string;
+  beforeId?: number;
 }
 
 export const api = {
@@ -55,6 +58,18 @@ export const api = {
   },
   getAppIcon: (appName: string): Promise<string | null> => {
     return ipcRenderer.invoke('inkwell:getAppIcon', appName);
+  },
+
+  onCaptureStatusChanged: (callback: (running: boolean) => void) => {
+    const handler = (_event: unknown, running: boolean) => callback(running);
+    ipcRenderer.on('inkwell:captureStatusChanged', handler);
+    return () => { ipcRenderer.removeListener('inkwell:captureStatusChanged', handler); };
+  },
+
+  onBackendError: (callback: (message: string) => void) => {
+    const handler = (_event: unknown, message: string) => callback(message);
+    ipcRenderer.on('inkwell:backendError', handler);
+    return () => { ipcRenderer.removeListener('inkwell:backendError', handler); };
   },
 
   // Capture Controls

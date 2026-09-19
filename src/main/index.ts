@@ -1,7 +1,6 @@
 import { app, BrowserWindow, Menu, shell, crashReporter, powerMonitor } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 // Must be started as early as possible — captures native/hardware-exception
@@ -15,7 +14,7 @@ import { logger } from './logger';
 import { loadConfig } from './config/store';
 import { getDatabase, closeDatabase } from './db/connection';
 import { startPermissionWatcher, stopPermissionWatcher } from './capture/permissionWatcher';
-import { startCapture, stopCapture } from './capture/keyHook';
+import { stopCapture, setCaptureBlocked, onCaptureStatusChanged, startBackgroundSync, stopBackgroundSync } from './capture/keyHook';
 import { startActiveAppTracker, stopActiveAppTracker } from './capture/activeApp';
 import { registerIpcHandlers } from './ipc/registerHandlers';
 import { setupTray, updateTrayMenu } from './tray/trayManager';
@@ -76,6 +75,7 @@ export function showWindow(): void {
   }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
+    mainWindow?.show();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -215,12 +215,16 @@ function createWindow(): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     },
   });
 
   // DO NOT call showWindow() from ready-to-show — this steals focus from the user's
   // current app on launch. The tray icon handles window visibility instead.
+  const win = mainWindow;
+  let recoveryAttempts = 0;
+  let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+
   mainWindow.on('ready-to-show', () => {
     logger.info('main', 'BrowserWindow ready-to-show (staying hidden for tray app)');
   });
@@ -245,7 +249,8 @@ function createWindow(): void {
   });
 
   mainWindow.on('closed', () => {
-    mainWindow = null;
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    if (mainWindow === win) mainWindow = null;
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -267,6 +272,12 @@ function createWindow(): void {
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logger.error('renderer', 'Renderer process gone', details);
+    if (!getIsQuitting() && details.reason !== 'clean-exit' && recoveryAttempts < 3) {
+      recoveryAttempts++;
+      recoveryTimer = setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.reload();
+      }, recoveryAttempts * 1000);
+    }
   });
   mainWindow.webContents.on('unresponsive', () => logger.warn('renderer', 'Renderer became unresponsive'));
   mainWindow.webContents.on('responsive', () => logger.info('renderer', 'Renderer became responsive'));
@@ -277,13 +288,14 @@ function createWindow(): void {
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL).catch((err) => logger.error('renderer', 'Load failed', err));
   } else {
-    mainWindow.loadFile(htmlPath);
+    void mainWindow.loadFile(htmlPath).catch((err) => logger.error('renderer', 'Load failed', err));
   }
 }
 
 app.whenReady().then(() => {
+  if (!gotTheLock) return;
   logger.checkPreviousRun();
   logger.info('main', 'Build info', { appVersion: app.getVersion(), logFormatVersion: 2 });
   logger.info('main', `App ready — PID ${process.pid}, platform ${process.platform}`, {
@@ -307,8 +319,13 @@ app.whenReady().then(() => {
 
   // 1. Initialize config & DB
   loadConfig();
-  getDatabase();
-  logger.info('main', 'Config and database initialized');
+  try {
+    getDatabase();
+    logger.info('main', 'Config and database initialized');
+  } catch (err) {
+    // Keep the tray and error/retry UI available if storage is temporarily unavailable.
+    logger.error('main', 'Database initialization failed; operations will retry', err);
+  }
 
   // 2. Setup macOS Application Menu
   setupApplicationMenu();
@@ -318,7 +335,10 @@ app.whenReady().then(() => {
 
   // 4. Create window & Tray
   createWindow();
-  setupTray(() => mainWindow, showWindow, hideWindow);
+  setupTray(() => mainWindow, showWindow);
+  onCaptureStatusChanged(() => updateTrayMenu());
+  startPermissionWatcher(() => updateTrayMenu());
+  startBackgroundSync();
 
   // 6. Ensure persistent app startup on login (macOS)
   if (process.platform === 'darwin') {
@@ -335,24 +355,24 @@ app.whenReady().then(() => {
   // 7. Handle OS sleep / wake and screen lock / unlock lifecycle
   powerMonitor.on('suspend', () => {
     logger.info('lifecycle', 'System going to sleep — pausing key capture and trackers');
-    stopCapture();
+    setCaptureBlocked('sleep', true);
     stopActiveAppTracker();
   });
 
   powerMonitor.on('resume', () => {
     logger.info('lifecycle', 'System woke from sleep — resuming key capture and trackers');
     startActiveAppTracker();
-    startCapture();
+    setCaptureBlocked('sleep', false);
   });
 
   powerMonitor.on('lock-screen', () => {
     logger.info('lifecycle', 'Screen locked — pausing key capture');
-    stopCapture();
+    setCaptureBlocked('lock', true);
   });
 
   powerMonitor.on('unlock-screen', () => {
     logger.info('lifecycle', 'Screen unlocked — resuming key capture');
-    startCapture();
+    setCaptureBlocked('lock', false);
   });
 
   logger.info('main', 'Initialization complete');
@@ -370,7 +390,6 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', (event) => {
-  if (memoryGuardTimer) clearInterval(memoryGuardTimer);
   // On macOS, prevent quitting unless requestQuit() was explicitly called (e.g. from Tray menu)
   if (!getIsQuitting() && process.platform === 'darwin') {
     logger.debug('main', 'before-quit intercepted — hiding window because quit was not requested');
@@ -379,6 +398,8 @@ app.on('before-quit', (event) => {
     return;
   }
 
+  if (memoryGuardTimer) clearInterval(memoryGuardTimer);
+  stopBackgroundSync();
   const reason = getQuitReason();
   logger.info('main', `before-quit — cleaning up resources (reason: ${reason})`);
   setIsQuitting(true);
@@ -409,58 +430,12 @@ app.on('window-all-closed', () => {
   }
 });
 
-// ── Proactive OOM guard ───────────────────────────────────────────────────
-// macOS jetsam SIGKILL is uncatchable. Self-relaunch cleanly when:
-//   a) Process RSS exceeds 500 MB (process-level pressure), OR
-//   b) System free memory drops below 5% (system-level pressure — the
-//      actual root cause of the two jetsam kills in the log at 1.4% and 1.0%)
-// NOTE: os.freemem() is NOT used because macOS treats unallocated RAM as 0 while
-// using system buffer cache, which causes false OOM kills.
-const MEMORY_CRITICAL_MB = 500;
-const SYSTEM_FREE_MEM_CRITICAL_RATIO = 0.05; // below 5% free → jetsam risk
+// Monitor process growth without restarting on macOS's low free-memory figure.
 let memoryGuardTimer: ReturnType<typeof setInterval> | null = null;
-
 function startMemoryGuard(): void {
   memoryGuardTimer = setInterval(() => {
     const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    const freeMemRatio = Math.round((os.freemem() / os.totalmem()) * 1000) / 1000;
-
-    const processOOM = rssMb > MEMORY_CRITICAL_MB;
-    const systemOOM = freeMemRatio < SYSTEM_FREE_MEM_CRITICAL_RATIO;
-
-    if (processOOM || systemOOM) {
-      if (processOOM) {
-        logger.error('main', 'Memory pressure critical (process RSS) — self-relaunching before likely OS force-kill', {
-          rssMb,
-          freeMemRatio,
-          trigger: 'process-rss',
-        });
-      } else {
-        logger.error('main', 'Memory pressure critical (system free) — self-relaunching before likely jetsam SIGKILL', {
-          rssMb,
-          freeMemRatio,
-          trigger: 'system-free',
-        });
-      }
-
-      if (process.env.NODE_ENV !== 'production') {
-        logger.warn('main', 'Skipping OOM self-relaunch because app is running in non-production mode', {
-          rssMb,
-          freeMemRatio,
-        });
-        return;
-      }
-
-      setIsQuitting(true);
-      stopPermissionWatcher();
-      stopActiveAppTracker();
-      stopCapture();
-      closeDatabase();
-      logger.logShutdown('proactive-oom-guard-relaunch');
-      logger.close();
-      app.relaunch();
-      app.exit(0);
-    }
+    if (rssMb > 500) logger.warn('main', 'High process memory usage', { rssMb });
   }, 20_000);
 }
 

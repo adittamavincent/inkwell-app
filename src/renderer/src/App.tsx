@@ -6,7 +6,7 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { PermissionBanner } from './components/PermissionBanner';
 import { PermissionGate } from './components/PermissionGate';
 import { SessionPreview, KeystrokePayload, SyncResponse, PermissionStatus } from './types';
-import type { PaginatedHistoryResult, GetHistoryParams } from '@preload/index';
+import type { GetHistoryParams } from '@preload/index';
 import { reconstructText, stripChipMarkers } from '../../shared/reconstructor';
 import { DEFAULT_CONFIG, CogdexSyncConfig } from '../../shared/constants';
 
@@ -23,18 +23,29 @@ export const App: React.FC = () => {
   const [isFetchingMoreHistory, setIsFetchingMoreHistory] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const historyCursor = useRef<number>();
+  const historyLoading = useRef(false);
+  const historyGeneration = useRef(0);
+  const requestedIcons = useRef(new Set<string>());
+
+  useEffect(() => {
+    const report = (event: PromiseRejectionEvent) => {
+      event.preventDefault();
+      console.error('Inkwell operation failed:', event.reason);
+      setError('The operation failed. Please try again.');
+    };
+    window.addEventListener('unhandledrejection', report);
+    return () => window.removeEventListener('unhandledrejection', report);
+  }, []);
 
   const fetchIcon = useCallback((appName: string) => {
     if (!appName || appName === 'Unknown') return;
-    setAppIcons((prev) => {
-      if (prev[appName] !== undefined) return prev;
-      window.inkwellApi?.getAppIcon?.(appName).then((icon) => {
-        if (icon) {
-          setAppIcons((current) => ({ ...current, [appName]: icon }));
-        }
-      });
-      return { ...prev, [appName]: null };
-    });
+    if (requestedIcons.current.has(appName)) return;
+    requestedIcons.current.add(appName);
+    void window.inkwellApi?.getAppIcon?.(appName).then((icon) => {
+      setAppIcons((current) => ({ ...current, [appName]: icon }));
+    }).catch(() => { requestedIcons.current.delete(appName); });
   }, []);
 
   const handleActiveAppInfo = useCallback((data: any) => {
@@ -64,6 +75,10 @@ export const App: React.FC = () => {
   const liveAppRef = useRef<string>('');
   const liveStartRef = useRef<string | null>(null);
   const lastKeyTimeRef = useRef<number>(0);
+  const liveBufferSize = useRef(0);
+  const liveEndRef = useRef<string>();
+  const liveStartIdRef = useRef<number>();
+  const liveEndIdRef = useRef<number>();
 
   const flushLiveSession = useCallback(() => {
     if (liveTokensRef.current.length > 0) {
@@ -71,11 +86,18 @@ export const App: React.FC = () => {
       if (reconstructed.trim()) {
         const newSession: SessionPreview = {
           start: liveStartRef.current || new Date().toISOString(),
+          startIso: liveStartRef.current || undefined,
+          endIso: liveEndRef.current,
+          startId: liveStartIdRef.current,
+          endId: liveEndIdRef.current,
           app: liveAppRef.current || 'Unknown',
           text: reconstructed,
         };
         setHistory((prev) => [newSession, ...prev]);
       }
+      liveStartIdRef.current = liveEndIdRef.current = undefined;
+      liveEndRef.current = undefined;
+      liveBufferSize.current = 0;
       liveTokensRef.current = [];
       liveAppRef.current = '';
       liveStartRef.current = null;
@@ -105,16 +127,24 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!window.inkwellApi) return;
 
-    window.inkwellApi.getConfig().then(setConfig);
-    
-    // Initial load of latest 100 history sessions
-    window.inkwellApi.getHistory({ limit: 100 }).then((result) => {
-      setHistory(result.sessions);
+    let disposed = false;
+    const generation = ++historyGeneration.current;
+    historyLoading.current = true;
+    setIsFetchingMoreHistory(true);
+    void window.inkwellApi.getConfig().then((value) => { if (!disposed) setConfig(value); }).catch(() => setError('Could not load settings.'));
+    void window.inkwellApi.getHistory({ limit: 100 }).then((result) => {
+      if (disposed || generation !== historyGeneration.current) return;
+      setHistory((prev) => [...prev, ...result.sessions]);
+      historyCursor.current = result.nextBeforeId;
       setHasMoreHistory(result.hasMore);
+    }).catch(() => { if (!disposed) setError('Could not load history. Try loading again.'); }).finally(() => {
+      if (disposed || generation !== historyGeneration.current) return;
+      historyLoading.current = false;
+      setIsFetchingMoreHistory(false);
     });
 
     // Initial frontmost app
-    window.inkwellApi.getActiveApp?.().then(handleActiveAppInfo);
+    window.inkwellApi.getActiveApp?.().then(handleActiveAppInfo).catch(() => setError('Could not read the active app.'));
 
     // Initial non-prompting permission status check
     window.inkwellApi.checkPermissions().then((status) => {
@@ -124,6 +154,7 @@ export const App: React.FC = () => {
       setIsOnboarded(fullyAuthorized);
     }).catch((err) => {
       console.error('Failed to check permissions:', err);
+      setError('Could not check permissions. Reload to try again.');
       setIsOnboarded(false);
     });
 
@@ -132,6 +163,7 @@ export const App: React.FC = () => {
 
     // Keystroke Stream Listener
     const unsubscribeKeystroke = window.inkwellApi.onKeystroke((payload: KeystrokePayload) => {
+      if (document.hidden) return;
       const now = Date.now();
       const idleLimitMs = (configRef.current.idleTimeoutSecs || 60) * 1000;
       const timedOut =
@@ -142,70 +174,22 @@ export const App: React.FC = () => {
         payload.keyChar === '[CLICK:LEFT]' ||
         payload.keyChar === '[⌘A]';
 
-      if (isBreakToken) {
-        // Force commit of active live session into history
-        if (liveTokensRef.current.length > 0) {
-          const reconstructed = reconstructText(liveTokensRef.current);
-          if (reconstructed.trim()) {
-            const finishedSession: SessionPreview = {
-              start: liveStartRef.current || new Date().toISOString(),
-              app: liveAppRef.current || 'Unknown',
-              text: reconstructed,
-            };
-            setHistory((prev) => [finishedSession, ...prev]);
-          }
-        }
-        liveTokensRef.current = [];
-        liveAppRef.current = '';
-        liveStartRef.current = null;
-        setLiveTokens([]);
-        setLiveText('');
-        setLiveStart(null);
-        setLiveApp('');
-        lastKeyTimeRef.current = now;
-        return;
+      if (isBreakToken || timedOut ||
+          (liveAppRef.current && liveAppRef.current !== payload.appName) ||
+          liveTokensRef.current.length >= 5000 || liveBufferSize.current >= 50000) {
+        flushLiveSession();
       }
-
-      if (timedOut) {
-        // Idle gap splits unconditionally
-        if (liveTokensRef.current.length > 0) {
-          const reconstructed = reconstructText(liveTokensRef.current);
-          if (reconstructed.trim()) {
-            const finishedSession: SessionPreview = {
-              start: liveStartRef.current || new Date().toISOString(),
-              app: liveAppRef.current || 'Unknown',
-              text: reconstructed,
-            };
-            setHistory((prev) => [finishedSession, ...prev]);
-          }
-        }
-
-        liveTokensRef.current = [payload.keyChar];
-        liveAppRef.current = payload.appName;
-        liveStartRef.current = payload.timestamp;
-      } else if (liveAppRef.current && liveAppRef.current === payload.appName) {
-        // Continuation in same app
-        liveTokensRef.current.push(payload.keyChar);
-      } else {
-        // App changed or starting first session
-        if (liveTokensRef.current.length > 0) {
-          const reconstructed = reconstructText(liveTokensRef.current);
-          if (reconstructed.trim()) {
-            const finishedSession: SessionPreview = {
-              start: liveStartRef.current || new Date().toISOString(),
-              app: liveAppRef.current || 'Unknown',
-              text: reconstructed,
-            };
-            setHistory((prev) => [finishedSession, ...prev]);
-          }
-        }
-
-        liveTokensRef.current = [payload.keyChar];
-        liveAppRef.current = payload.appName;
-        liveStartRef.current = payload.timestamp;
-      }
-
       lastKeyTimeRef.current = now;
+      if (isBreakToken) return;
+      if (!liveTokensRef.current.length) {
+        liveAppRef.current = payload.appName;
+        liveStartRef.current = payload.timestamp;
+        liveStartIdRef.current = payload.id;
+      }
+      liveTokensRef.current.push(payload.keyChar);
+      liveBufferSize.current += payload.keyChar.length;
+      liveEndRef.current = payload.timestamp;
+      liveEndIdRef.current = payload.id;
 
       // Update React state for instant UI rendering
       const currentTokens = [...liveTokensRef.current];
@@ -214,6 +198,30 @@ export const App: React.FC = () => {
       setLiveStart(liveStartRef.current);
       setLiveText(reconstructText(currentTokens));
     });
+
+    const refreshOnShow = () => {
+      if (document.hidden) {
+        flushLiveSession();
+        return;
+      }
+      const generation = ++historyGeneration.current;
+      historyLoading.current = true;
+      setIsFetchingMoreHistory(true);
+      void window.inkwellApi!.getHistory({ limit: 100 }).then((result) => {
+        if (disposed || generation !== historyGeneration.current) return;
+        setHistory(result.sessions);
+        historyCursor.current = result.nextBeforeId;
+        setHasMoreHistory(result.hasMore);
+      }).catch(() => setError('Could not refresh history.')).finally(() => {
+        if (disposed || generation !== historyGeneration.current) return;
+        historyLoading.current = false;
+        setIsFetchingMoreHistory(false);
+      });
+    };
+    document.addEventListener('visibilitychange', refreshOnShow);
+
+    const unsubscribeBackendError = window.inkwellApi.onBackendError?.(setError);
+    const unsubscribeCapture = window.inkwellApi.onCaptureStatusChanged?.(setIsRunning);
 
     // Main Process Permission Watcher Event Listeners
     const unsubscribeStatusChanged = window.inkwellApi.onPermissionStatusChanged?.(
@@ -236,13 +244,17 @@ export const App: React.FC = () => {
     });
 
     return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', refreshOnShow);
+      unsubscribeCapture?.();
+      unsubscribeBackendError?.();
       unsubscribeActiveApp?.();
       unsubscribeKeystroke();
       unsubscribeStatusChanged?.();
       unsubscribePermissionGranted?.();
       unsubscribePermissionRevoked?.();
     };
-  }, [handlePermissionUpdate]);
+  }, [handlePermissionUpdate, handleActiveAppInfo, flushLiveSession]);
 
   // Re-check permission on window focus to immediately detect in-session revocation or grant
   useEffect(() => {
@@ -270,33 +282,37 @@ export const App: React.FC = () => {
     };
   }, [handlePermissionUpdate]);
 
-  // Load more history for infinite scroll
-  const handleLoadMoreHistory = useCallback(async () => {
-    if (isFetchingMoreHistory || !hasMoreHistory) return;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (liveTokensRef.current.length && Date.now() - lastKeyTimeRef.current > configRef.current.idleTimeoutSecs * 1000) {
+        flushLiveSession();
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [flushLiveSession]);
 
+  const handleLoadMoreHistory = useCallback(async () => {
+    if (historyLoading.current || !hasMoreHistory || !window.inkwellApi) return;
+    const generation = historyGeneration.current;
+    historyLoading.current = true;
     setIsFetchingMoreHistory(true);
     try {
-      // Get the oldest session's timestamp to fetch older sessions
-      const oldestSession = history[history.length - 1];
-      let params: GetHistoryParams | undefined;
-
-      if (oldestSession && oldestSession.endIso) {
-        params = { limit: 100, before: oldestSession.endIso };
-      } else {
-        params = { limit: 100 };
-      }
-
-      const result = await window.inkwellApi?.getHistory(params);
-      if (result) {
-        setHistory((prev) => [...prev, ...result.sessions]);
-        setHasMoreHistory(result.hasMore);
-      }
+      const params: GetHistoryParams = { limit: 100, beforeId: historyCursor.current };
+      const result = await window.inkwellApi.getHistory(params);
+      if (generation !== historyGeneration.current) return;
+      setHistory((prev) => [...prev, ...result.sessions]);
+      historyCursor.current = result.nextBeforeId;
+      setHasMoreHistory(result.hasMore);
+      setError(null);
     } catch (err) {
-      console.error('Failed to load more history:', err);
+      setError('Could not load history. Try loading again.');
     } finally {
-      setIsFetchingMoreHistory(false);
+      if (generation === historyGeneration.current) {
+        historyLoading.current = false;
+        setIsFetchingMoreHistory(false);
+      }
     }
-  }, [isFetchingMoreHistory, hasMoreHistory, history]);
+  }, [hasMoreHistory]);
 
   const handleToggleCapture = async () => {
     if (!window.inkwellApi) return;
@@ -307,8 +323,14 @@ export const App: React.FC = () => {
 
   const handleClearHistory = async () => {
     if (!window.inkwellApi) return;
+    ++historyGeneration.current;
+    historyLoading.current = false;
+    setIsFetchingMoreHistory(false);
     await window.inkwellApi.clearHistory();
+    historyCursor.current = undefined;
+    setHasMoreHistory(false);
     liveTokensRef.current = [];
+    liveBufferSize.current = 0;
     liveAppRef.current = '';
     liveStartRef.current = null;
     lastKeyTimeRef.current = 0;
@@ -319,13 +341,14 @@ export const App: React.FC = () => {
     setLiveApp('');
   };
 
-  const handleDeleteSession = async (session: SessionPreview, index: number) => {
-    // Optimistic UI removal
-    setHistory((prev) => prev.filter((_, idx) => idx !== index));
-    // Persist deletion in SQLite
-    if (window.inkwellApi?.deleteSession) {
-      await window.inkwellApi.deleteSession(session);
-    }
+  const handleDeleteSession = async (session: SessionPreview) => {
+    if (!window.inkwellApi?.deleteSession) return;
+    ++historyGeneration.current;
+    historyLoading.current = false;
+    setIsFetchingMoreHistory(false);
+    await window.inkwellApi.deleteSession(session);
+    // Use identity, since new live sessions can shift every index while IPC runs.
+    setHistory((prev) => prev.filter((item) => item !== session));
   };
 
   const handleCopyText = async (text: string) => {
@@ -394,10 +417,11 @@ export const App: React.FC = () => {
 
   // Loading state before initial check resolves (prevents flash of gate)
   if (isOnboarded === null || !permissions) {
+    if (error) return <div className="p-8 text-ink-text" role="alert">{error} <button onClick={() => window.location.reload()}>Reload</button></div>;
     if (typeof window !== 'undefined' && !window.inkwellApi) {
       return (
         <div className="h-screen w-screen bg-ink-bg text-ink-text flex items-center justify-center font-mono text-xs text-ink-muted select-none">
-          <span>Inkwell API initializing...</span>
+          <span>The app connection is unavailable. <button onClick={() => window.location.reload()}>Reload window</button></span>
         </div>
       );
     }
@@ -441,6 +465,11 @@ export const App: React.FC = () => {
         sessionCount={effectiveSessionCount}
       />
 
+      {error && <div role="alert" className="p-3 text-xs text-ink-warning">
+        {error} {error.toLowerCase().includes('history') && <button onClick={() => { setError(null); void handleLoadMoreHistory(); }}>Retry history</button>}
+        <button onClick={() => setError(null)} className="ml-3">Dismiss</button>
+      </div>}
+
       {/* Safety Net Banner for in-session permission revocation / missing permission */}
       <PermissionBanner
         accessibility={permissions.accessibility}
@@ -451,7 +480,7 @@ export const App: React.FC = () => {
         onOpenInputMonitoringSettings={handleOpenInputMonitoringSettings}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden relative min-w-0 w-full">
+      <main className="flex-1 min-h-0 flex flex-col overflow-hidden relative min-w-0 w-full">
         <LiveFeed
           app={liveApp}
           appIcon={(liveApp && appIcons[liveApp]) || detectedAppIcon}

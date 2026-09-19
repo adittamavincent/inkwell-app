@@ -3,7 +3,7 @@ import path from 'node:path';
 import { CogdexSyncConfig } from '../config/store';
 import { querySessionsSince } from '../db/repository';
 import { groupSessions, SessionPreview } from './sessionGrouper';
-import { getLastSync, writeLastSync } from './watermark';
+import { getLastSync, getLastSyncId, writeLastSync } from './watermark';
 import { logger } from '../logger';
 
 import { stripChipMarkers } from './reconstructor';
@@ -46,18 +46,21 @@ function appendToNote(filePath: string, blocks: string[]): void {
     fs.mkdirSync(parent, { recursive: true });
   }
 
-  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-  const appended = blocks.join('\n');
-
-  let newContent: string;
-  if (existing.trim().length > 0) {
-    const sep = existing.endsWith('\n\n') ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
-    newContent = `${existing}${sep}${appended}`;
-  } else {
-    newContent = `${appended}\n`;
+  // Read only the trailing separator, not the entire growing daily note.
+  let separator = '';
+  if (fs.existsSync(filePath)) {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size) {
+        const tail = Buffer.alloc(Math.min(size, 2));
+        fs.readSync(fd, tail, 0, tail.length, size - tail.length);
+        const ending = tail.toString('utf8');
+        separator = ending.endsWith('\n\n') ? '' : ending.endsWith('\n') ? '\n' : '\n\n';
+      }
+    } finally { fs.closeSync(fd); }
   }
-
-  fs.writeFileSync(filePath, newContent, 'utf8');
+  fs.appendFileSync(filePath, `${separator}${blocks.join('\n')}\n`, 'utf8');
 }
 
 /**
@@ -72,7 +75,7 @@ function resolveKeylogPath(config: CogdexSyncConfig, now: Date): string {
   return path.join(cleanVault, dailyRoot, dayName, `${dayName}${suffix}.md`);
 }
 
-export function doSync(config: CogdexSyncConfig): { success: boolean; message: string } {
+function sync(config: CogdexSyncConfig): { success: boolean; message: string } {
   if (!config.enabled) {
     return {
       success: true,
@@ -98,7 +101,7 @@ export function doSync(config: CogdexSyncConfig): { success: boolean; message: s
 
   const lastSync = getLastSync();
   const sinceDate = lastSync || new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const rows = querySessionsSince(sinceDate.toISOString());
+  const rows = querySessionsSince(sinceDate.toISOString(), getLastSyncId());
 
   if (rows.length === 0) {
     return {
@@ -107,8 +110,11 @@ export function doSync(config: CogdexSyncConfig): { success: boolean; message: s
     };
   }
 
-  const sessions = groupSessions(rows, config.idleTimeoutSecs);
+  const lastRow = rows[rows.length - 1];
+  const checkpointTime = new Date(lastRow[0]);
+  const sessions = groupSessions(rows.map(([timestamp, app, key]) => [timestamp, app, key] as [string, string, string]), config.idleTimeoutSecs);
   if (sessions.length === 0) {
+    writeLastSync(checkpointTime, lastRow[3]);
     return {
       success: true,
       message: 'Captured sessions were too short to sync.',
@@ -121,7 +127,7 @@ export function doSync(config: CogdexSyncConfig): { success: boolean; message: s
 
   try {
     appendToNote(notePath, blocks);
-    writeLastSync(now);
+    writeLastSync(checkpointTime, lastRow[3]);
     logger.debug('cogdexSync', `Synced ${sessions.length} session(s) to ${notePath}`);
     return {
       success: true,
@@ -133,5 +139,13 @@ export function doSync(config: CogdexSyncConfig): { success: boolean; message: s
       success: false,
       message: `Sync failed: ${err?.message || String(err)}`,
     };
+  }
+}
+
+export function doSync(config: CogdexSyncConfig): { success: boolean; message: string } {
+  try { return sync(config); }
+  catch (err) {
+    logger.error('cogdexSync', 'Sync failed', err);
+    return { success: false, message: `Sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }

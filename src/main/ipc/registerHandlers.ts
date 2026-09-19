@@ -1,8 +1,9 @@
 import { ipcMain, clipboard, BrowserWindow } from 'electron';
 import {
   isCaptureRunning,
-  startCapture,
-  stopCapture,
+  setCaptureEnabled,
+  flushCaptureQueue,
+  discardPendingCapture,
 } from '../capture/keyHook';
 import {
   checkAccessibilityStatus,
@@ -34,25 +35,14 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   });
 
   ipcMain.handle('inkwell:toggleCapture', (_event, start: boolean) => {
-    if (start) {
-      const acc = checkAccessibilityStatus();
-      const inp = checkInputMonitoringStatus();
-      if (acc === 'authorized' && inp === 'authorized') {
-        startCapture();
-      } else {
-        stopCapture();
-      }
-    } else {
-      stopCapture();
-    }
-    const running = isCaptureRunning();
-    updateTrayMenu(getMainWindow());
+    const running = setCaptureEnabled(start);
+    updateTrayMenu();
     return running;
   });
 
   ipcMain.handle('inkwell:checkPermissions', (): PermissionStatus => {
     const status = checkAndSyncPermissionState();
-    updateTrayMenu(getMainWindow());
+    updateTrayMenu();
     return status;
   });
 
@@ -76,27 +66,30 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     openAccessibilitySettings();
   });
 
-  ipcMain.handle('inkwell:getHistory', (_event, params?: { limit?: number; before?: string }) => {
+  ipcMain.handle('inkwell:getHistory', (_event, params?: { limit?: number; before?: string; beforeId?: number }) => {
     const config = getConfig();
     return loadHistoryPaginated({
       limit: params?.limit ?? 100,
       before: params?.before,
+      beforeId: params?.beforeId,
       idleTimeoutSecs: config.idleTimeoutSecs,
     });
   });
 
   ipcMain.handle('inkwell:clearHistory', () => {
+    flushCaptureQueue();
     clearHistory();
+    discardPendingCapture();
   });
 
   ipcMain.handle(
     'inkwell:deleteSession',
-    (_event, session: { startIso?: string; endIso?: string; app?: string; start?: any }) => {
+    (_event, session: { startIso?: string; endIso?: string; app?: string; start?: any; startId?: number; endId?: number }) => {
       const startIso =
         session.startIso ||
         (session.start instanceof Date ? session.start.toISOString() : String(session.start || ''));
       const endIso = session.endIso || startIso;
-      deleteSessionEntry(startIso, endIso, session.app);
+      deleteSessionEntry(startIso, endIso, session.app, session.startId, session.endId);
     }
   );
 

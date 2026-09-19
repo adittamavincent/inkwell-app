@@ -1,10 +1,13 @@
 import { app, Menu, nativeImage, Tray, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
-import { isCaptureRunning, startCapture, stopCapture } from '../capture/keyHook';
+import { isCaptureRunning, setCaptureEnabled } from '../capture/keyHook';
 import { requestQuit } from '../lifecycle';
 import { logger } from '../logger';
 
 let tray: Tray | null = null;
+let windowTarget: WindowTarget;
+let openWindow: (() => void) | undefined;
+let menuRunning: boolean | undefined;
 
 function createTrayIcon(): Electron.NativeImage {
   // Load a proper PNG template image for the macOS menu bar.
@@ -28,12 +31,16 @@ function resolveWindow(target?: WindowTarget): BrowserWindow | null {
 }
 
 export function updateTrayMenu(
-  windowTarget?: WindowTarget,
+  target?: WindowTarget,
   onOpenWindow?: () => void
 ): void {
+  if (target !== undefined) windowTarget = target;
+  if (onOpenWindow) openWindow = onOpenWindow;
   if (!tray) return;
 
   const running = isCaptureRunning();
+  if (menuRunning === running) return;
+  menuRunning = running;
   // Accelerators on a Tray's context menu only function as local key-equivalents while that specific menu is open
   // (macOS-only behavior in Electron — this project targets arm64/darwin exclusively per electron-builder.config.cjs, so this is safe),
   // they are not global shortcuts and won't fire when the menu is closed.
@@ -47,23 +54,19 @@ export function updateTrayMenu(
       label: running ? 'Pause Capture' : 'Resume Capture',
       accelerator: 'CommandOrControl+P',
       click: () => {
-        if (running) {
-          stopCapture();
-        } else {
-          startCapture();
-        }
-        updateTrayMenu(windowTarget, onOpenWindow);
+        setCaptureEnabled(!isCaptureRunning());
+        updateTrayMenu();
       },
     },
     {
       label: 'Open Inkwell Window',
       accelerator: 'CommandOrControl+O',
       click: () => {
-        if (onOpenWindow) {
-          onOpenWindow();
+        if (openWindow) {
+          openWindow();
         } else {
           const win = resolveWindow(windowTarget);
-          if (win) {
+          if (win && !win.isDestroyed()) {
             if (win.isMinimized()) win.restore();
             win.show();
             win.focus();
@@ -94,33 +97,15 @@ export function updateTrayMenu(
 }
 
 export function setupTray(
-  windowTarget?: WindowTarget,
-  onOpenWindow?: () => void,
-  onHideWindow?: () => void
+  target?: WindowTarget,
+  onOpenWindow?: () => void
 ): Tray {
-  const icon = createTrayIcon();
-  tray = new Tray(icon);
-  updateTrayMenu(windowTarget, onOpenWindow);
+  tray?.destroy();
+  tray = new Tray(createTrayIcon());
+  menuRunning = undefined;
+  updateTrayMenu(target, onOpenWindow);
+  // Let the native context menu own clicks. Showing/hiding a Dock window here
+  // changes app activation while macOS is tracking the menu.
   logger.info('tray', 'System tray initialized');
-
-  tray.on('click', () => {
-    const win = resolveWindow(windowTarget);
-    if (win && win.isVisible()) {
-      if (onHideWindow) {
-        onHideWindow();
-      } else {
-        win.hide();
-      }
-    } else {
-      if (onOpenWindow) {
-        onOpenWindow();
-      } else if (win) {
-        if (win.isMinimized()) win.restore();
-        win.show();
-        win.focus();
-      }
-    }
-  });
-
   return tray;
 }

@@ -7,36 +7,30 @@ export function insertKeystroke(
   appName: string,
   keyChar: string,
   keyCode: number
-): void {
+): number {
   const db = getDatabase();
   const encryptedChar = encrypt(keyChar);
   const stmt = db.prepare(`
     INSERT INTO keystrokes (timestamp, app_name, key_char, key_code)
     VALUES (?, ?, ?, ?)
   `);
-  stmt.run(timestamp, appName, encryptedChar, keyCode);
+  return Number(stmt.run(timestamp, appName, encryptedChar, keyCode).lastInsertRowid);
 }
 
-export function querySessionsSince(sinceIso: string): Array<[string, string, string]> {
+export function querySessionsSince(sinceIso: string, afterId?: number): Array<[string, string, string, number]> {
   const db = getDatabase();
-  const stmt = db.prepare(`
-    SELECT timestamp, app_name, key_char
-    FROM keystrokes
-    WHERE timestamp >= ?
-    ORDER BY id ASC
-  `);
-  const rows = stmt.all(sinceIso) as Array<{
-    timestamp: string;
-    app_name: string;
-    key_char: string;
-  }>;
-
-  return rows.map((r) => [r.timestamp, r.app_name || 'Unknown', decrypt(r.key_char)]);
+  const rows = db.prepare(`
+    SELECT id, timestamp, app_name, key_char FROM keystrokes
+    WHERE ${afterId === undefined ? 'timestamp >= ?' : 'id > ?'}
+    ORDER BY id ASC LIMIT 5000
+  `).all(afterId ?? sinceIso) as Array<{ id: number; timestamp: string; app_name: string; key_char: string }>;
+  return rows.map((r) => [r.timestamp, r.app_name || 'Unknown', decrypt(r.key_char || ''), r.id]);
 }
 
 export interface PaginatedHistoryOptions {
   limit?: number;
   before?: string;
+  beforeId?: number;
   idleTimeoutSecs?: number;
 }
 
@@ -44,73 +38,42 @@ export interface PaginatedHistoryResult {
   sessions: SessionPreview[];
   hasMore: boolean;
   oldestTimestamp?: string;
+  nextBeforeId?: number;
 }
 
 export function loadHistoryPaginated(
   options: PaginatedHistoryOptions = {}
 ): PaginatedHistoryResult {
-  const limit = options.limit ?? 100;
+  const limit = Number.isFinite(options.limit)
+    ? Math.max(1, Math.min(100, Math.floor(options.limit!))) : 100;
   const idleTimeoutSecs = options.idleTimeoutSecs ?? 60;
-  const beforeIso = options.before;
-
   const db = getDatabase();
+  // Bound each request, including pages containing only clicks/control keys.
   const chunkSize = Math.max(limit * 50, 2000);
-  let rows: Array<{ id: number; timestamp: string; app_name: string; key_char: string }> = [];
-
-  if (beforeIso) {
-    const stmt = db.prepare(`
-      SELECT id, timestamp, app_name, key_char
-      FROM keystrokes
-      WHERE timestamp < ?
-      ORDER BY id DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(beforeIso, chunkSize) as any;
-  } else {
-    const stmt = db.prepare(`
-      SELECT id, timestamp, app_name, key_char
-      FROM keystrokes
-      ORDER BY id DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(chunkSize) as any;
+  const beforeId = options.beforeId;
+  if (beforeId !== undefined && (!Number.isSafeInteger(beforeId) || beforeId < 1)) {
+    throw new Error('Invalid history cursor');
   }
+  const predicate = beforeId !== undefined ? 'WHERE id < ?' : options.before ? 'WHERE timestamp < ?' : '';
+  const args: (string | number)[] = beforeId !== undefined ? [beforeId] : options.before ? [options.before] : [];
+  const rows = db.prepare(`
+    SELECT id, timestamp, app_name, key_char FROM keystrokes
+    ${predicate} ORDER BY id DESC LIMIT ?
+  `).all(...args, chunkSize) as Array<{ id: number; timestamp: string; app_name: string; key_char: string }>;
+  if (!rows.length) return { sessions: [], hasMore: false };
 
-  if (rows.length === 0) {
-    return { sessions: [], hasMore: false };
-  }
-
-  const oldestRow = rows[rows.length - 1];
-  const countBeforeStmt = db.prepare('SELECT COUNT(*) as count FROM keystrokes WHERE id < ?');
-  const countBeforeResult = countBeforeStmt.get(oldestRow.id) as { count: number };
-  const hasOlderRowsInDb = (countBeforeResult?.count ?? 0) > 0;
-
-  const rowsAsc = [...rows].reverse();
-  const decryptedRows: Array<[string, string, string]> = rowsAsc.map((r) => [
-    r.timestamp,
-    r.app_name || 'Unknown',
-    decrypt(r.key_char),
-  ]);
-
-  let sessions = groupSessions(decryptedRows, idleTimeoutSecs).reverse();
-
-  let hasMore = hasOlderRowsInDb;
-  if (sessions.length > limit) {
-    hasMore = true;
-    sessions = sessions.slice(0, limit);
-  }
-
+  const grouped = groupSessions([...rows].reverse().map((row) => ({
+    id: row.id, timestamp: row.timestamp, appName: row.app_name || 'Unknown',
+    keyChar: decrypt(row.key_char || ''),
+  })), idleTimeoutSecs).sort((a, b) => b.startId! - a.startId!);
+  const sessions = grouped.slice(0, limit);
   const oldestSession = sessions[sessions.length - 1];
-  const oldestTimestamp = oldestSession
-    ? typeof oldestSession.start === 'string'
-      ? oldestSession.start
-      : oldestSession.start.toISOString()
-    : undefined;
-
+  const oldestRow = rows[rows.length - 1];
+  const nextBeforeId = grouped.length > limit ? oldestSession.startId! : oldestRow.id;
+  const hasMore = !!db.prepare('SELECT 1 FROM keystrokes WHERE id < ? LIMIT 1').get(nextBeforeId);
   return {
-    sessions,
-    hasMore,
-    oldestTimestamp,
+    sessions, hasMore, nextBeforeId,
+    oldestTimestamp: grouped.length > limit ? oldestSession.startIso : oldestRow.timestamp,
   };
 }
 
@@ -136,9 +99,11 @@ export function loadAllHistory(idleTimeoutSecs = 60): SessionPreview[] {
   return groupSessions(decryptedRows, idleTimeoutSecs).reverse();
 }
 
-export function deleteSessionEntry(startIso: string, endIso?: string, appName?: string): void {
+export function deleteSessionEntry(startIso: string, endIso?: string, appName?: string, startId?: number, endId?: number): void {
   const db = getDatabase();
-  if (startIso && endIso && appName) {
+  if (Number.isSafeInteger(startId) && Number.isSafeInteger(endId) && startId! > 0 && endId! >= startId! && appName) {
+    db.prepare('DELETE FROM keystrokes WHERE id >= ? AND id <= ? AND app_name = ?').run(startId, endId, appName);
+  } else if (startIso && endIso && appName) {
     db.prepare('DELETE FROM keystrokes WHERE timestamp >= ? AND timestamp <= ? AND app_name = ?')
       .run(startIso, endIso, appName);
   } else if (startIso && endIso) {
@@ -156,5 +121,5 @@ export function deleteSessionEntry(startIso: string, endIso?: string, appName?: 
 export function clearHistory(): void {
   const db = getDatabase();
   db.prepare('DELETE FROM keystrokes').run();
-  db.exec('VACUUM');
+  // Avoid an exclusive, full-file VACUUM on the Electron UI thread.
 }

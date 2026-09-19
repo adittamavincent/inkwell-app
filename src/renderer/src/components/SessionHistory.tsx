@@ -41,7 +41,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
       const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
       // Trigger load more when within 150px of bottom
-      if (hasMore && scrollTop + clientHeight >= scrollHeight - 150) {
+      if (hasMore && !isFetchingMore && scrollTop + clientHeight >= scrollHeight - 150) {
         onLoadMore();
       }
     };
@@ -49,7 +49,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     const container = scrollContainerRef.current;
     container?.addEventListener('scroll', handleScroll);
     return () => container?.removeEventListener('scroll', handleScroll);
-  }, [hasMore, onLoadMore]);
+  }, [hasMore, isFetchingMore, onLoadMore, sessions.length]);
 
   const handleCopy = (text: string, index: number) => {
     onCopyText(text);
@@ -82,7 +82,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     };
   }, [contextMenu]);
 
-  if (sessions.length === 0) {
+  if (sessions.length === 0 && !hasMore && !isFetchingMore) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center border border-dashed border-ink-border/60 rounded-xl bg-ink-panel/20 select-none">
         <div className="w-10 h-10 rounded-full bg-ink-panel flex items-center justify-center text-ink-faint mb-3 border border-ink-border/60">
@@ -99,7 +99,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   }
 
   return (
-    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-1 relative">
+    <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1 relative">
       <div className="flex items-center justify-between px-1 select-none">
         <span className="text-[11px] font-mono text-ink-faint uppercase tracking-wider font-medium">
           Archived Sessions ({sessions.length})
@@ -110,15 +110,14 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
       </div>
 
       {sessions.map((session, index) => {
-        const timeStr = typeof session.start === 'string'
-          ? session.start
-          : new Date(session.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeStr = new Date(session.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
         const icon = appIcons[session.app];
 
         return (
           <div
-            key={index}
+            key={session.startId ?? `${session.startIso || session.start}-${session.app}-${index}`}
+            style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
             onContextMenu={(e) => handleContextMenu(e, session, index)}
             className="group relative bg-ink-panel border border-ink-border/80 hover:border-ink-accent/40 rounded-lg p-3 transition-all shadow-subtle flex flex-col gap-2"
           >
@@ -171,6 +170,10 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
           </div>
         );
       })}
+
+      {hasMore && !isFetchingMore && (
+        <button type="button" onClick={onLoadMore} className="w-full p-3 text-xs text-ink-muted">Load older sessions</button>
+      )}
 
       {/* Loading Indicator for Infinite Scroll */}
       {isFetchingMore && (

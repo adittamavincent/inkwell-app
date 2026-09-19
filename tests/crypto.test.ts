@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+vi.mock('../src/main/storage/paths', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkwell-crypto-'));
+  return { getAppDataDir: () => dir };
+});
 import { encrypt, decrypt } from '../src/main/db/crypto';
 
 describe('AES-256-GCM crypto', () => {

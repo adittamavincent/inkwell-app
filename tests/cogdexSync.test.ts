@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { doSync } from '../src/main/sync/cogdexSync';
+vi.mock('../src/main/sync/watermark', () => ({ getLastSync: () => null, getLastSyncId: () => undefined, writeLastSync: vi.fn() }));
+import * as watermark from '../src/main/sync/watermark';
+import { DEFAULT_CONFIG } from '../src/shared/constants';
 import * as repo from '../src/main/db/repository';
 
 describe('Cogdex Obsidian Sync', () => {
@@ -34,9 +37,9 @@ describe('Cogdex Obsidian Sync', () => {
     fs.writeFileSync(notePath, existingContent, 'utf8');
 
     vi.spyOn(repo, 'querySessionsSince').mockReturnValue([
-      [now.toISOString(), 'Obsidian', 'n'],
-      [now.toISOString(), 'Obsidian', 'e'],
-      [now.toISOString(), 'Obsidian', 'w'],
+      [now.toISOString(), 'Obsidian', 'n', 1],
+      [now.toISOString(), 'Obsidian', 'e', 2],
+      [now.toISOString(), 'Obsidian', 'w', 3],
     ]);
 
     const result = doSync({
@@ -66,8 +69,8 @@ describe('Cogdex Obsidian Sync', () => {
     const notePath = path.join(tmpVault, 'Daily', dayStr, `${dayStr} - keylog.md`);
 
     vi.spyOn(repo, 'querySessionsSince').mockReturnValue([
-      [now.toISOString(), 'Code', 'h'],
-      [now.toISOString(), 'Code', 'i'],
+      [now.toISOString(), 'Code', 'h', 1],
+      [now.toISOString(), 'Code', 'i', 2],
     ]);
 
     const result = doSync({
@@ -89,4 +92,15 @@ describe('Cogdex Obsidian Sync', () => {
     expect(content).toContain('Code');
     expect(content).toContain('hi');
   });
+  it('returns a recoverable error when the database is unavailable', () => {
+    vi.spyOn(repo, 'querySessionsSince').mockImplementation(() => { throw new Error('database locked'); });
+    expect(doSync({ ...DEFAULT_CONFIG, enabled: true, vaultPath: tmpVault })).toMatchObject({ success: false, message: 'Sync failed: database locked' });
+  });
+
+  it('does not claim success when the sync checkpoint cannot be saved', () => {
+    vi.spyOn(repo, 'querySessionsSince').mockReturnValue([[new Date().toISOString(), 'Notes', 't', 1]]);
+    vi.spyOn(watermark, 'writeLastSync').mockImplementation(() => { throw new Error('disk full'); });
+    expect(doSync({ ...DEFAULT_CONFIG, enabled: true, vaultPath: tmpVault }).success).toBe(false);
+  });
+
 });

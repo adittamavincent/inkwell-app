@@ -18,9 +18,10 @@
     "pack": "export PYTHON=/usr/bin/python3 && export CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --dir",
     "reset-permissions": "tccutil reset Accessibility com.inkwell.app && tccutil reset ListenEvent com.inkwell.app",
     "reset-permissions:dev": "tccutil reset Accessibility com.github.Electron && tccutil reset ListenEvent com.github.Electron",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "test": "node scripts/test.cjs run",
+    "test:watch": "node scripts/test.cjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node scripts/smoke.cjs"
   },
   "dependencies": {
     "active-win": "^8.2.1",

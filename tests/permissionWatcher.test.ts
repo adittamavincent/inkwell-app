@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('../src/main/capture/activeApp', () => ({ startActiveAppTracker: vi.fn(), stopActiveAppTracker: vi.fn(), getFrontmostAppName: () => 'Notes' }));
+
 // Mock electron
 vi.mock('electron', () => ({
   BrowserWindow: {

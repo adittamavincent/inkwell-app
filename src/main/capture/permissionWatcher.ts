@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { broadcast } from '../broadcast';
 import {
   checkAccessibilityStatus,
   checkInputMonitoringStatus,
@@ -22,17 +22,8 @@ function broadcastPermissionState(status: PermissionStatus): void {
   const isFullyAuthorized =
     status.accessibility === 'authorized' && status.inputMonitoring === 'authorized';
 
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed()) {
-      win.webContents.send('inkwell:permissionStatusChanged', status);
-      if (isFullyAuthorized) {
-        win.webContents.send('inkwell:permissionGranted');
-      } else {
-        win.webContents.send('inkwell:permissionRevoked');
-      }
-    }
-  }
+  broadcast('inkwell:permissionStatusChanged', status);
+  broadcast(isFullyAuthorized ? 'inkwell:permissionGranted' : 'inkwell:permissionRevoked');
 }
 
 /**
@@ -109,6 +100,8 @@ export function checkAndSyncPermissionState(): PermissionStatus {
       }
     }
   } else {
+    // Retry a transient native-hook failure; startCapture preserves manual pauses.
+    if (isFullyAuthorized && !isCaptureRunning()) startCapture();
     // Status stable — clear any pending debounce
     pendingStatus = null;
     pendingCount = 0;

@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import activeWin from 'active-win';
+import { createRequire } from 'node:module';
 import { BrowserWindow, app } from 'electron';
 import { logger } from '../logger';
+import { broadcast } from '../broadcast';
 
 export interface ActiveAppInfo {
   name: string;
@@ -16,6 +18,7 @@ let cachedAppIcon: string | null = null;
 let lastQueryTime = 0;
 const CACHE_TTL_MS = 250;
 let isQuerying = false;
+let trackerGeneration = 0;
 let pollingInterval: NodeJS.Timeout | null = null;
 let lastSuppressedLogTime = 0;
 const SUPPRESS_LOG_INTERVAL_MS = 5000;
@@ -199,7 +202,16 @@ function findInkwellIconPath(): string | null {
   return null;
 }
 
-export async function fetchAppIcon(ownerPath?: string, appName?: string): Promise<string | null> {
+const pendingIcons = new Map<string, Promise<string | null>>();
+export function fetchAppIcon(ownerPath?: string, appName?: string): Promise<string | null> {
+  const key = `${ownerPath || ''}:${appName || ''}`;
+  const pending = pendingIcons.get(key);
+  if (pending) return pending;
+  const request = resolveAppIcon(ownerPath, appName).finally(() => pendingIcons.delete(key));
+  pendingIcons.set(key, request);
+  return request;
+}
+async function resolveAppIcon(ownerPath?: string, appName?: string): Promise<string | null> {
   const cleanName = (appName || '').trim();
   const isInkwell =
     cleanName.toLowerCase() === 'inkwell' ||
@@ -278,22 +290,31 @@ export function getCachedAppIcon(appName: string): string | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function broadcastActiveApp(appInfo: ActiveAppInfo): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed()) {
-      win.webContents.send('inkwell:activeAppChanged', appInfo);
-    }
-  }
+  broadcast('inkwell:activeAppChanged', appInfo);
+}
+
+// active-win's macOS wrapper has no child-process timeout. Kill a stuck helper
+// so it cannot leave isQuerying set forever after sleep or permission changes.
+function queryActiveWindow(): ReturnType<typeof activeWin> {
+  if (process.platform !== 'darwin') return activeWin({ accessibilityPermission: false, screenRecordingPermission: false });
+  const require = createRequire(import.meta.url);
+  const binary = path.join(path.dirname(require.resolve('active-win')), 'main');
+  return new Promise((resolve, reject) => {
+    execFile(binary, ['--no-accessibility-permission', '--no-screen-recording-permission'],
+      { timeout: 2000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        if (err) { reject(err); return; }
+        try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
+      });
+  });
 }
 
 async function refreshActiveApp(): Promise<void> {
   if (isQuerying) return;
   isQuerying = true;
+  const generation = trackerGeneration;
   try {
-    const result = await activeWin({
-      accessibilityPermission: false,
-      screenRecordingPermission: false,
-    });
+    const result = await queryActiveWindow();
+    if (generation !== trackerGeneration) return;
     if (result && result.owner && result.owner.name) {
       let newName = result.owner.name.trim() || 'Unknown';
       const ownerPath = result.owner.path;
@@ -307,8 +328,9 @@ async function refreshActiveApp(): Promise<void> {
         (ownerPath && (ownerPath.includes('Electron.app') || ownerPath.includes('Inkwell.app')));
 
       if (isCurrentApp) {
-        // Do NOT broadcast Inkwell as the active app — this causes ghost focus issues.
-        // Keep the previous cached app name so other apps aren't interrupted.
+        cachedAppName = 'Inkwell';
+        cachedAppIcon = null;
+        // Suppress only the UI event; capture still needs the true app identity.
         const now = Date.now();
         if (now - lastSuppressedLogTime > SUPPRESS_LOG_INTERVAL_MS) {
           logger.debug('activeApp', `activeWin returned Inkwell/Electron (pid=${result.owner.processId}), suppressing broadcast`);
@@ -318,6 +340,7 @@ async function refreshActiveApp(): Promise<void> {
       }
 
       const icon = await fetchAppIcon(ownerPath, newName);
+      if (generation !== trackerGeneration) return;
 
       if (newName !== cachedAppName || icon !== cachedAppIcon) {
         cachedAppName = newName;
@@ -347,6 +370,7 @@ export function startActiveAppTracker(intervalMs = 250): void {
 }
 
 export function stopActiveAppTracker(): void {
+  trackerGeneration++;
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;

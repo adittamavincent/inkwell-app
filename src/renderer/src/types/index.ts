@@ -16,6 +16,8 @@ export interface CogdexSyncConfig {
 }
 
 export interface SessionPreview {
+  startId?: number;
+  endId?: number;
   start: string | Date;
   startIso?: string;
   endIso?: string;
@@ -24,6 +26,7 @@ export interface SessionPreview {
 }
 
 export interface KeystrokePayload {
+  id?: number;
   timestamp: string;
   appName: string;
   keyChar: string;

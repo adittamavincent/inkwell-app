@@ -1,9 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import * as crypto from '../src/main/db/crypto';
+vi.mock('../src/main/db/crypto', () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock('../src/main/db/connection', async (original) => {
+  const actual = await original<typeof import('../src/main/db/connection')>();
+  return { ...actual, getDatabase: () => (globalThis as any).__inkwell_test_db };
+});
 import { initSchema } from '../src/main/db/connection';
 import {
   insertKeystroke,
+  querySessionsSince,
+  deleteSessionEntry,
   loadHistoryPaginated,
   loadAllHistory,
   clearHistory,
@@ -24,8 +30,7 @@ describe('loadHistoryPaginated', () => {
   });
 
   afterEach(() => {
-    clearHistory();
-    db.close();
+    db?.close();
     delete (globalThis as any).__inkwell_test_db;
   });
 
@@ -98,4 +103,52 @@ describe('loadHistoryPaginated', () => {
     const result = loadHistoryPaginated({ limit: 100 });
     expect(result.hasMore).toBe(false);
   });
+  it('advances through click-only pages without losing older text', () => {
+    insertKeystroke('2026-09-01T00:00:00Z', 'Notes', 'h', 0);
+    for (let i = 0; i < 2100; i++) insertKeystroke('2026-09-02T00:00:00Z', 'Notes', '[CLICK]', 0);
+    const first = loadHistoryPaginated({ limit: 1 });
+    expect(first.sessions).toEqual([]);
+    expect(first.hasMore).toBe(true);
+    const second = loadHistoryPaginated({ limit: 1, beforeId: first.nextBeforeId });
+    expect(second.sessions[0].text).toBe('h');
+    expect(second.hasMore).toBe(false);
+  });
+
+  it('does not skip or repeat sessions that share a timestamp', () => {
+    for (const app of ['A', 'B', 'C']) insertKeystroke('2026-09-01T00:00:00Z', app, app, 0);
+    const seen: string[] = [];
+    let beforeId: number | undefined;
+    for (let page = 0; page < 3; page++) {
+      const result = loadHistoryPaginated({ limit: 1, beforeId });
+      seen.push(...result.sessions.map((s) => s.text));
+      beforeId = result.nextBeforeId;
+      expect(result.hasMore).toBe(page < 2);
+    }
+    expect(seen).toEqual(['C', 'B', 'A']);
+  });
+
+  it('bounds invalid limits and rejects invalid cursors', () => {
+    insertKeystroke('2026-09-01T00:00:00Z', 'Notes', 'h', 0);
+    expect(loadHistoryPaginated({ limit: Infinity }).sessions).toHaveLength(1);
+    expect(loadHistoryPaginated({ limit: 0 }).sessions).toHaveLength(1);
+    expect(() => loadHistoryPaginated({ beforeId: NaN })).toThrow('Invalid history cursor');
+  });
+
+  it('batches sync by ID without losing equal-timestamp rows', () => {
+    for (let i = 0; i < 5002; i++) insertKeystroke('2026-09-01T00:00:00Z', 'Notes', 'a', 0);
+    const first = querySessionsSince('2026-08-01T00:00:00Z');
+    expect(first).toHaveLength(5000);
+    const second = querySessionsSince('2026-08-01T00:00:00Z', first.at(-1)![3]);
+    expect(second).toHaveLength(2);
+    expect(second[0][3]).toBeGreaterThan(first.at(-1)![3]);
+  });
+
+  it('deletes only the selected session when timestamps collide', () => {
+    const first = insertKeystroke('2026-09-01T00:00:00Z', 'Notes', 'a', 0);
+    insertKeystroke('2026-09-01T00:00:00Z', 'Notes', '[CLICK]', 0);
+    insertKeystroke('2026-09-01T00:00:00Z', 'Notes', 'b', 0);
+    deleteSessionEntry('2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Notes', first, first);
+    expect(loadHistoryPaginated().sessions.map(s => s.text)).toEqual(['b']);
+  });
+
 });

@@ -18,10 +18,11 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
 }) => {
   const count = keystrokeCount ?? tokenCount ?? 0;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followTail = useRef(true);
   const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!scrollRef.current) return;
+    if (!scrollRef.current || !followTail.current) return;
     rafRef.current = requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -31,7 +32,7 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
   }, [text]);
 
   return (
-    <div className="bg-ink-panel border border-ink-border rounded-lg p-3 flex flex-col gap-2 relative overflow-hidden shadow-subtle">
+    <div className="bg-ink-panel border border-ink-border rounded-lg p-3 shrink-0 flex flex-col gap-2 relative overflow-hidden shadow-subtle">
       {/* LiveFeed Bar Header */}
       <div className="flex items-center justify-between text-xs select-none">
         <div className="flex items-center gap-2">
@@ -60,6 +61,10 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
       {/* Content Feed Container */}
       <div
         ref={scrollRef}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          followTail.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
         className="bg-ink-bg/70 border border-ink-border-subtle rounded-md p-3 font-mono text-xs text-ink-text whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-h-[56px] max-h-[220px] select-text overflow-y-auto flex-1 focus-within:border-ink-accent/40 transition-colors"
       >
         {!text ? (

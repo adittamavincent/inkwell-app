@@ -9,14 +9,17 @@ export function getDatabase(): Database.Database {
   if (dbInstance) return dbInstance;
 
   const dbPath = path.join(getAppDataDir(), 'inkwell.db');
+  let opened: Database.Database | undefined;
   try {
-    dbInstance = new Database(dbPath);
-    dbInstance.pragma('journal_mode = WAL');
-    initSchema(dbInstance);
+    opened = new Database(dbPath, { timeout: 1000 });
+    opened.pragma('journal_mode = WAL');
+    initSchema(opened);
+    dbInstance = opened;
 
     logger.info('db', `Database opened at ${dbPath}`);
     return dbInstance;
   } catch (err) {
+    opened?.close();
     logger.error('db', `Failed to open database at ${dbPath}`, err);
     throw err;
   }

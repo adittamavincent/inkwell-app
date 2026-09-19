@@ -1,12 +1,15 @@
 import { reconstructText } from './reconstructor';
 
 export interface KeystrokeRow {
+  id?: number;
   timestamp: string;
   appName: string;
   keyChar: string;
 }
 
 export interface SessionPreview {
+  startId?: number;
+  endId?: number;
   start: Date | string;
   startIso?: string;
   endIso?: string;
@@ -15,6 +18,8 @@ export interface SessionPreview {
 }
 
 interface InternalSession {
+  startId?: number;
+  endId?: number;
   start: string;
   last: string;
   app: string;
@@ -91,6 +96,8 @@ export function groupSessions(
         state.activeSession = null;
       }
       state.activeSession = {
+        startId: Array.isArray(item) ? undefined : item.id,
+        endId: Array.isArray(item) ? undefined : item.id,
         start: ts,
         last: ts,
         app: trimmedApp,
@@ -100,12 +107,15 @@ export function groupSessions(
       // Continuation in same app
       state.activeSession.tokens.push(cleanKey);
       state.activeSession.last = ts;
+      state.activeSession.endId = Array.isArray(item) ? undefined : item.id;
     } else {
       // App changed or starting first session
       if (state.activeSession) {
         sessions.push(state.activeSession);
       }
       state.activeSession = {
+        startId: Array.isArray(item) ? undefined : item.id,
+        endId: Array.isArray(item) ? undefined : item.id,
         start: ts,
         last: ts,
         app: trimmedApp,
@@ -132,6 +142,7 @@ export function groupSessions(
     const startDate = new Date(s.start);
     result.push({
       start: isNaN(startDate.getTime()) ? new Date() : startDate,
+      ...(s.startId !== undefined ? { startId: s.startId, endId: s.endId } : {}),
       startIso: s.start,
       endIso: s.last,
       app: s.app,
